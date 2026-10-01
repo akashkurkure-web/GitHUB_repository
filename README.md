@@ -14,6 +14,37 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 
 ---
 
+## 0. Open it online (no download)
+
+> First merge this code into the `main` branch on GitHub. Both options below use `main` by default.
+
+### Option A: GitHub Codespaces (private, about 2 minutes, nothing to install)
+1. Open the repository on github.com and switch to the branch that holds this code.
+2. Click the green **Code** button → **Codespaces** tab → **Create codespace on …**.
+3. Wait about 1-2 minutes. Dependencies install and the store starts by itself; a browser tab opens at
+   `https://<name>-3000.app.github.dev`.
+   *If no tab opens:* open the **Ports** tab at the bottom, then click the 🌐 icon next to port 3000.
+4. Admin login: `admin@bazaario.local` / `ChangeMe123` (set in `.devcontainer/devcontainer.json`; change it there).
+5. *To share the link with others:* Ports tab → right-click port 3000 → **Port Visibility → Public**.
+   - The codespace stops after 30 minutes of inactivity. Reopen it from github.com/codespaces.
+   - Personal accounts get about 60 free hours a month.
+
+### Option B: Render (public website with HTTPS, free tier)
+1. Sign up at <https://render.com> using **Sign in with GitHub**.
+2. Click **New + → Blueprint**, pick this repository, and Render reads `render.yaml`.
+   *Or use the button:* [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/akashkurkure-web/GitHUB_repository)
+3. When asked, enter **ADMIN_EMAIL** and **ADMIN_PASSWORD** (choose a strong one) → **Apply**.
+4. After about 3-5 minutes your store is live at `https://bazaario-xxxx.onrender.com`.
+   *To use your own domain:* Settings → Custom Domains.
+5. Limits of the free plan:
+   - It sleeps after 15 minutes idle, so the first visit takes about 50 seconds.
+   - **Its disk is wiped on every restart or redeploy**, so orders and accounts reset to demo data.
+   - *Workaround for permanent data:* upgrade to the Starter plan, add a **Disk** mounted at `/var/data`, and set the env var `DB_FILE=/var/data/bazaario.db`.
+
+*Other hosts that work the same way:* Railway, Fly.io, Azure App Service, AWS Elastic Beanstalk. Use the Docker image from Section 4.
+
+---
+
 ## 1. Feature map (marketplace parity)
 
 | Area | Features |

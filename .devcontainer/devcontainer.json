@@ -1,0 +1,15 @@
+{
+  "name": "Bazaario",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "containerEnv": {
+    "TRUST_PROXY": "1",
+    "ADMIN_EMAIL": "admin@bazaario.local",
+    "ADMIN_PASSWORD": "ChangeMe123"
+  },
+  "postCreateCommand": "npm install",
+  "postAttachCommand": "npm start",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "Bazaario store", "onAutoForward": "openBrowser" }
+  }
+}

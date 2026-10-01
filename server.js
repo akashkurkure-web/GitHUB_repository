@@ -12,7 +12,7 @@ const { loadSession, csrfProtect, HttpError } = require('./src/security');
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  if (config.isProd) app.set('trust proxy', 1); // behind a TLS-terminating load balancer
+  if (config.trustProxy) app.set('trust proxy', config.trustProxy); // behind a TLS-terminating proxy
 
   // Security headers: strict CSP (no inline script, no third-party origins), HSTS, frame-deny, no-sniff, etc.
   app.use(helmet({

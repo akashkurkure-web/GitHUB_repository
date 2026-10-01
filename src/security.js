@@ -125,7 +125,9 @@ function csrfProtect(req, _res, next) {
   if (origin) {
     let host;
     try { host = new URL(origin).host; } catch { return next(new HttpError(403, 'Invalid request origin.')); }
-    if (host !== req.get('host')) return next(new HttpError(403, 'Cross-site request blocked.'));
+    // Hosted proxies (e.g. Codespaces port forwarding) may rewrite Host; the public name is then in X-Forwarded-Host.
+    const allowed = [req.get('host'), req.get('x-forwarded-host')].filter(Boolean);
+    if (!allowed.includes(host)) return next(new HttpError(403, 'Cross-site request blocked.'));
   }
   if (req.session) {
     const sent = String(req.get('x-csrf-token') || '');
