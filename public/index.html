@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Bazaario - Online shopping for mobiles, electronics, fashion, home, books and more. Free delivery, easy returns, Cash on Delivery.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Bazaario - Online Shopping for Everything</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="logo" aria-label="Bazaario home"><span class="logo-mark">b</span>bazaario<span class="logo-in">.in</span></a>
+    <button class="deliver" id="deliver-btn" type="button">
+      <span class="small">Deliver to</span>
+      <span class="strong" id="deliver-pin">📍 Select PIN code</span>
+    </button>
+    <form class="search" id="search-form" role="search" autocomplete="off">
+      <select id="search-cat" aria-label="Search category"><option value="">All</option></select>
+      <div class="search-box">
+        <input id="search-input" type="search" placeholder="Search Bazaario.in" aria-label="Search products" maxlength="100">
+        <ul class="suggest" id="suggest" hidden></ul>
+      </div>
+      <button type="submit" aria-label="Search">🔍</button>
+    </form>
+    <a class="nav-link" id="account-link" href="#/login">
+      <span class="small" id="hello">Hello, sign in</span>
+      <span class="strong">Account &amp; Lists ▾</span>
+    </a>
+    <a class="nav-link" href="#/orders"><span class="small">Returns</span><span class="strong">&amp; Orders</span></a>
+    <a class="nav-link cart-link" href="#/cart" aria-label="Cart"><span class="cart-icon">🛒<span id="cart-count">0</span></span><span class="strong">Cart</span></a>
+  </header>
+  <nav class="subnav" id="subnav" aria-label="Categories">
+    <a href="#/s?deals=1">Today's Deals</a>
+  </nav>
+  <main id="app" tabindex="-1"><div class="loading">Loading…</div></main>
+  <footer class="footer">
+    <a href="#top" class="back-top" id="back-top">Back to top</a>
+    <div class="footer-cols">
+      <div><h4>Get to Know Us</h4><a href="#/page/about">About Bazaario</a><a href="#/page/careers">Careers</a><a href="#/page/press">Press Releases</a></div>
+      <div><h4>Make Money with Us</h4><a href="#/page/sell">Sell on Bazaario</a><a href="#/page/affiliate">Become an Affiliate</a><a href="#/page/ads">Advertise Your Products</a></div>
+      <div><h4>Let Us Help You</h4><a href="#/account">Your Account</a><a href="#/orders">Returns Centre</a><a href="#/page/protection">100% Purchase Protection</a><a href="#/page/help">Help</a></div>
+      <div><h4>Policies</h4><a href="#/page/privacy">Privacy Notice</a><a href="#/page/terms">Conditions of Use</a><a href="#/page/returns">Return Policy</a></div>
+    </div>
+    <p class="copy">© 2026 Bazaario. All prices are inclusive of GST.</p>
+  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="modal"><div id="modal-body"></div></dialog>
+</body>
+</html>
