@@ -132,8 +132,10 @@ async function afterLogin(data, redirect) {
 }
 
 async function logout() {
-  await api('POST', '/auth/logout').catch(() => {});
-  state.user = null; state.csrf = null;
+  const r = await api('POST', '/auth/logout').catch(() => ({}));
+  state.user = null;
+  state.csrf = r.csrfToken || null;
+  if (!state.csrf) await refreshSession().catch(() => {});
   renderHeader();
   toast('You have been signed out.');
   location.hash = '#/';

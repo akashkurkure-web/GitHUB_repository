@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Bazaario: run server",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/manage.py",
+      "args": ["runserver", "8000"],
+      "django": true,
+      "env": { "ADMIN_EMAIL": "admin@bazaario.local", "ADMIN_PASSWORD": "ChangeMe123" }
+    },
+    {
+      "name": "Bazaario: run tests",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/manage.py",
+      "args": ["test", "store"],
+      "django": true
+    }
+  ]
+}

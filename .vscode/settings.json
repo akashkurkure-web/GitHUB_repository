@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+  "python.testing.unittestEnabled": false,
+  "files.exclude": { "**/__pycache__": true, "staticfiles": true }
+}

@@ -1,18 +1,22 @@
-# Render Blueprint: New > Blueprint > pick this repo, or use the "Deploy to Render" button in README.md
+# Render Blueprint: New > Blueprint > pick this repo.
 services:
   - type: web
     name: bazaario
-    runtime: node
+    runtime: python
     plan: free
-    buildCommand: npm ci --omit=dev
-    startCommand: npm start
-    healthCheckPath: /api/config
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: python manage.py migrate --noinput && python manage.py seed && gunicorn bazaario.wsgi --bind 0.0.0.0:$PORT --workers 2
+    healthCheckPath: /api/health
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: NODE_VERSION
-        value: 22.12.0
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DJANGO_PRODUCTION
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
       - key: ADMIN_EMAIL
-        sync: false   # Render asks you for this when you create the service
+        sync: false   # Render asks for this when you create the service
       - key: ADMIN_PASSWORD
         sync: false

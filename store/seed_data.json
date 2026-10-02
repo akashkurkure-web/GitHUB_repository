@@ -1,0 +1,727 @@
+{
+ "categories": [
+  {
+   "slug": "mobiles",
+   "name": "Mobiles",
+   "icon": "📱"
+  },
+  {
+   "slug": "electronics",
+   "name": "Electronics",
+   "icon": "💻"
+  },
+  {
+   "slug": "fashion",
+   "name": "Fashion",
+   "icon": "👕"
+  },
+  {
+   "slug": "home-kitchen",
+   "name": "Home & Kitchen",
+   "icon": "🏠"
+  },
+  {
+   "slug": "books",
+   "name": "Books",
+   "icon": "📚"
+  },
+  {
+   "slug": "beauty",
+   "name": "Beauty",
+   "icon": "💄"
+  },
+  {
+   "slug": "sports",
+   "name": "Sports & Fitness",
+   "icon": "🏏"
+  },
+  {
+   "slug": "toys",
+   "name": "Toys & Games",
+   "icon": "🧸"
+  },
+  {
+   "slug": "grocery",
+   "name": "Grocery",
+   "icon": "🛒"
+  },
+  {
+   "slug": "appliances",
+   "name": "Appliances",
+   "icon": "🔌"
+  }
+ ],
+ "products": [
+  {
+   "category": "mobiles",
+   "title": "Nova X5 5G (8GB RAM, 128GB) - Midnight Blue",
+   "brand": "Nova",
+   "price": 17999,
+   "mrp": 24999,
+   "stock": 120,
+   "emoji": "📱",
+   "color": "#dbe7ff",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "6.6\" 120Hz AMOLED display",
+    "50MP triple camera",
+    "5000mAh battery with 33W charging",
+    "Android 15"
+   ]
+  },
+  {
+   "category": "mobiles",
+   "title": "Pixelon 9 Pro (12GB, 256GB) - Graphite",
+   "brand": "Pixelon",
+   "price": 64999,
+   "mrp": 79999,
+   "stock": 40,
+   "emoji": "📱",
+   "color": "#e5e5e5",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "6.7\" LTPO display",
+    "Tensor-class AI chip",
+    "7 years of OS updates",
+    "IP68"
+   ]
+  },
+  {
+   "category": "mobiles",
+   "title": "Volt Lite 4G (4GB, 64GB) - Green",
+   "brand": "Volt",
+   "price": 7499,
+   "mrp": 9999,
+   "stock": 300,
+   "emoji": "📱",
+   "color": "#dff5e1",
+   "express": false,
+   "is_deal": true,
+   "features": [
+    "6.5\" HD+ display",
+    "13MP dual camera",
+    "5000mAh battery"
+   ]
+  },
+  {
+   "category": "mobiles",
+   "title": "Fast Charge 65W USB-C Charger",
+   "brand": "ChargeUp",
+   "price": 1299,
+   "mrp": 2499,
+   "stock": 500,
+   "emoji": "🔌",
+   "color": "#fff3d6",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "GaN technology",
+    "Universal compatibility",
+    "BIS certified"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "AirBeat Pro Wireless Earbuds with ANC",
+   "brand": "AirBeat",
+   "price": 2999,
+   "mrp": 6999,
+   "stock": 250,
+   "emoji": "🎧",
+   "color": "#f0e6ff",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Active noise cancellation",
+    "40hr playtime",
+    "IPX5 water resistant",
+    "Low-latency game mode"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "UltraBook 14 Laptop (i5, 16GB, 512GB SSD)",
+   "brand": "Stellar",
+   "price": 58990,
+   "mrp": 72990,
+   "stock": 30,
+   "emoji": "💻",
+   "color": "#e8eef5",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "14\" 2.2K display",
+    "1.3kg ultralight",
+    "Backlit keyboard",
+    "Windows 11 + Office"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "Smart Watch Fit 3 with SpO2 & Calling",
+   "brand": "Fitora",
+   "price": 1999,
+   "mrp": 5999,
+   "stock": 400,
+   "emoji": "⌚",
+   "color": "#ffe3e3",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "1.9\" AMOLED",
+    "Bluetooth calling",
+    "100+ sports modes",
+    "7-day battery"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "43\" 4K Ultra HD Smart LED TV",
+   "brand": "Visionex",
+   "price": 24999,
+   "mrp": 39999,
+   "stock": 25,
+   "emoji": "📺",
+   "color": "#dde9f0",
+   "express": false,
+   "is_deal": true,
+   "features": [
+    "4K HDR10",
+    "Dolby Audio 30W",
+    "Built-in streaming apps",
+    "3 HDMI ports"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "Portable Bluetooth Speaker 20W",
+   "brand": "BoomBox",
+   "price": 1799,
+   "mrp": 3499,
+   "stock": 180,
+   "emoji": "🔊",
+   "color": "#d9f2f2",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "20W stereo sound",
+    "12hr playtime",
+    "IPX7 waterproof"
+   ]
+  },
+  {
+   "category": "electronics",
+   "title": "Mirrorless Camera Kit 24MP with 18-55mm Lens",
+   "brand": "Optiq",
+   "price": 52990,
+   "mrp": 61990,
+   "stock": 12,
+   "emoji": "📷",
+   "color": "#efe9e1",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "24MP APS-C sensor",
+    "4K video",
+    "Flip screen for vlogging"
+   ]
+  },
+  {
+   "category": "fashion",
+   "title": "Men's Cotton Slim Fit Casual Shirt",
+   "brand": "UrbanThread",
+   "price": 599,
+   "mrp": 1499,
+   "stock": 600,
+   "emoji": "👔",
+   "color": "#e1ecf7",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "100% cotton",
+    "Machine wash",
+    "Sizes S-XXL"
+   ]
+  },
+  {
+   "category": "fashion",
+   "title": "Women's Printed Kurta Set",
+   "brand": "Desi Weaves",
+   "price": 899,
+   "mrp": 2499,
+   "stock": 350,
+   "emoji": "👗",
+   "color": "#fbe1ec",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Rayon fabric",
+    "Kurta + palazzo",
+    "Festive wear"
+   ]
+  },
+  {
+   "category": "fashion",
+   "title": "Running Shoes - Lightweight Mesh",
+   "brand": "Stride",
+   "price": 1499,
+   "mrp": 3999,
+   "stock": 220,
+   "emoji": "👟",
+   "color": "#e6f4ea",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Breathable mesh upper",
+    "Cushioned sole",
+    "Sizes 6-11"
+   ]
+  },
+  {
+   "category": "fashion",
+   "title": "Unisex Polarised Aviator Sunglasses",
+   "brand": "SunCraft",
+   "price": 699,
+   "mrp": 1999,
+   "stock": 300,
+   "emoji": "🕶️",
+   "color": "#f3f0e6",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "UV400 protection",
+    "Metal frame",
+    "Includes case"
+   ]
+  },
+  {
+   "category": "fashion",
+   "title": "Leather Bi-fold Wallet for Men",
+   "brand": "Hideworks",
+   "price": 449,
+   "mrp": 1299,
+   "stock": 500,
+   "emoji": "👛",
+   "color": "#efe4d9",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Genuine leather",
+    "RFID blocking",
+    "8 card slots"
+   ]
+  },
+  {
+   "category": "home-kitchen",
+   "title": "Non-Stick Cookware Set (3 pcs)",
+   "brand": "ChefNest",
+   "price": 1299,
+   "mrp": 2999,
+   "stock": 150,
+   "emoji": "🍳",
+   "color": "#fdebd3",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Induction compatible",
+    "PFOA free",
+    "Includes kadai, tawa, frypan"
+   ]
+  },
+  {
+   "category": "home-kitchen",
+   "title": "Stainless Steel Water Bottle 1L (Pack of 2)",
+   "brand": "HydraSteel",
+   "price": 549,
+   "mrp": 999,
+   "stock": 800,
+   "emoji": "🧴",
+   "color": "#e3f1f9",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Leak proof",
+    "Rust free",
+    "Fridge friendly"
+   ]
+  },
+  {
+   "category": "home-kitchen",
+   "title": "Cotton Double Bedsheet with 2 Pillow Covers",
+   "brand": "SleepWell Home",
+   "price": 799,
+   "mrp": 1999,
+   "stock": 260,
+   "emoji": "🛏️",
+   "color": "#ece6f7",
+   "express": false,
+   "is_deal": true,
+   "features": [
+    "210 TC cotton",
+    "King size",
+    "Colourfast"
+   ]
+  },
+  {
+   "category": "home-kitchen",
+   "title": "LED Desk Lamp with 3 Brightness Modes",
+   "brand": "Lumio",
+   "price": 899,
+   "mrp": 1799,
+   "stock": 140,
+   "emoji": "💡",
+   "color": "#fff8cf",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Eye-care LED",
+    "USB charging",
+    "Flexible neck"
+   ]
+  },
+  {
+   "category": "books",
+   "title": "Atomic Discipline: Small Habits, Big Results (Paperback)",
+   "brand": "Lighthouse Press",
+   "price": 349,
+   "mrp": 599,
+   "stock": 1000,
+   "emoji": "📘",
+   "color": "#e3ecff",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Paperback, 320 pages",
+    "English",
+    "Bestseller"
+   ]
+  },
+  {
+   "category": "books",
+   "title": "The Indian Kitchen: 500 Home Recipes (Hardcover)",
+   "brand": "Saffron Books",
+   "price": 699,
+   "mrp": 999,
+   "stock": 200,
+   "emoji": "📕",
+   "color": "#ffe1d6",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "Hardcover, 480 pages",
+    "Full-colour photos"
+   ]
+  },
+  {
+   "category": "books",
+   "title": "Crack the Coding Interview - 2026 Edition",
+   "brand": "TechReads",
+   "price": 549,
+   "mrp": 899,
+   "stock": 400,
+   "emoji": "📗",
+   "color": "#e2f5e2",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Paperback, 650 pages",
+    "200+ solved problems"
+   ]
+  },
+  {
+   "category": "beauty",
+   "title": "Vitamin C Face Serum 30ml",
+   "brand": "GlowLab",
+   "price": 399,
+   "mrp": 799,
+   "stock": 700,
+   "emoji": "🧪",
+   "color": "#fff1d9",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "10% Vitamin C",
+    "For all skin types",
+    "Dermatologically tested"
+   ]
+  },
+  {
+   "category": "beauty",
+   "title": "Matte Liquid Lipstick - Ruby Red",
+   "brand": "Velvet Muse",
+   "price": 299,
+   "mrp": 649,
+   "stock": 500,
+   "emoji": "💄",
+   "color": "#ffd9de",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "Long lasting 16hr",
+    "Transfer proof"
+   ]
+  },
+  {
+   "category": "beauty",
+   "title": "Beard Grooming Kit with Trimmer",
+   "brand": "Groomsmith",
+   "price": 1499,
+   "mrp": 2999,
+   "stock": 160,
+   "emoji": "🪒",
+   "color": "#e6e6ea",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "60 min runtime",
+    "20 length settings",
+    "Includes beard oil"
+   ]
+  },
+  {
+   "category": "sports",
+   "title": "English Willow Cricket Bat - Full Size",
+   "brand": "Boundary",
+   "price": 2499,
+   "mrp": 4499,
+   "stock": 70,
+   "emoji": "🏏",
+   "color": "#f6ecd9",
+   "express": false,
+   "is_deal": true,
+   "features": [
+    "Grade 2 English willow",
+    "Short handle",
+    "Includes cover"
+   ]
+  },
+  {
+   "category": "sports",
+   "title": "Anti-Skid Yoga Mat 6mm with Strap",
+   "brand": "Asana",
+   "price": 499,
+   "mrp": 1299,
+   "stock": 450,
+   "emoji": "🧘",
+   "color": "#dff3ef",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "TPE material",
+    "Dual layer grip",
+    "Carry strap"
+   ]
+  },
+  {
+   "category": "sports",
+   "title": "Adjustable Dumbbell Set 20kg",
+   "brand": "IronCore",
+   "price": 2199,
+   "mrp": 3999,
+   "stock": 90,
+   "emoji": "🏋️",
+   "color": "#e5e5e5",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "Chrome plated",
+    "Includes 2 rods + plates",
+    "Home gym ready"
+   ]
+  },
+  {
+   "category": "toys",
+   "title": "Building Blocks Set - 500 pcs",
+   "brand": "BrickTown",
+   "price": 999,
+   "mrp": 1999,
+   "stock": 210,
+   "emoji": "🧱",
+   "color": "#ffe9c7",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Age 6+",
+    "Compatible with major brands",
+    "Storage box"
+   ]
+  },
+  {
+   "category": "toys",
+   "title": "Remote Control Off-Road Car 1:16",
+   "brand": "TurboToys",
+   "price": 1599,
+   "mrp": 2999,
+   "stock": 110,
+   "emoji": "🚙",
+   "color": "#dde8ff",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "2.4GHz remote",
+    "Rechargeable",
+    "25 km/h top speed"
+   ]
+  },
+  {
+   "category": "toys",
+   "title": "Classic Board Game - Business Edition",
+   "brand": "FunFamily",
+   "price": 449,
+   "mrp": 799,
+   "stock": 300,
+   "emoji": "🎲",
+   "color": "#f0e1ff",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "2-6 players",
+    "Age 8+"
+   ]
+  },
+  {
+   "category": "grocery",
+   "title": "Premium Basmati Rice 5kg",
+   "brand": "Royal Harvest",
+   "price": 649,
+   "mrp": 899,
+   "stock": 900,
+   "emoji": "🍚",
+   "color": "#f6f3e8",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Extra long grain",
+    "Aged 2 years"
+   ]
+  },
+  {
+   "category": "grocery",
+   "title": "Cold Pressed Groundnut Oil 1L",
+   "brand": "Farm Pure",
+   "price": 279,
+   "mrp": 349,
+   "stock": 600,
+   "emoji": "🫙",
+   "color": "#fff4c9",
+   "express": true,
+   "is_deal": false,
+   "features": [
+    "Wood pressed",
+    "No chemicals"
+   ]
+  },
+  {
+   "category": "grocery",
+   "title": "Assam Tea 1kg",
+   "brand": "Tea Valley",
+   "price": 449,
+   "mrp": 599,
+   "stock": 700,
+   "emoji": "🍵",
+   "color": "#eadfd4",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "Strong CTC tea",
+    "Direct from estates"
+   ]
+  },
+  {
+   "category": "appliances",
+   "title": "Mixer Grinder 750W with 3 Jars",
+   "brand": "KitchenPro",
+   "price": 2899,
+   "mrp": 4999,
+   "stock": 130,
+   "emoji": "🥤",
+   "color": "#e3f0f7",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "750W copper motor",
+    "3 stainless steel jars",
+    "2 year warranty"
+   ]
+  },
+  {
+   "category": "appliances",
+   "title": "1.5 Ton 5 Star Inverter Split AC",
+   "brand": "CoolBreeze",
+   "price": 36990,
+   "mrp": 54990,
+   "stock": 20,
+   "emoji": "❄️",
+   "color": "#dff1fb",
+   "express": false,
+   "is_deal": true,
+   "features": [
+    "5 star energy rating",
+    "Copper condenser",
+    "Wi-Fi enabled"
+   ]
+  },
+  {
+   "category": "appliances",
+   "title": "Front Load Washing Machine 7kg",
+   "brand": "WashMate",
+   "price": 27990,
+   "mrp": 36990,
+   "stock": 18,
+   "emoji": "🧺",
+   "color": "#e7ecf3",
+   "express": false,
+   "is_deal": false,
+   "features": [
+    "1200 RPM",
+    "Inbuilt heater",
+    "Steam wash"
+   ]
+  },
+  {
+   "category": "appliances",
+   "title": "Air Fryer 4.2L Digital",
+   "brand": "CrispAir",
+   "price": 3499,
+   "mrp": 6999,
+   "stock": 140,
+   "emoji": "🍟",
+   "color": "#f2e4dc",
+   "express": true,
+   "is_deal": true,
+   "features": [
+    "Uses 90% less oil",
+    "8 presets",
+    "Dishwasher-safe basket"
+   ]
+  }
+ ],
+ "coupons": [
+  {
+   "code": "WELCOME10",
+   "kind": "percent",
+   "value": 10,
+   "max_discount": 20000,
+   "min_order": 49900,
+   "description": "Flat 10% off up to ₹200 on orders above ₹499"
+  },
+  {
+   "code": "SAVE100",
+   "kind": "flat",
+   "value": 10000,
+   "max_discount": null,
+   "min_order": 99900,
+   "description": "₹100 off on orders above ₹999"
+  },
+  {
+   "code": "FESTIVE15",
+   "kind": "percent",
+   "value": 15,
+   "max_discount": 150000,
+   "min_order": 299900,
+   "description": "15% off up to ₹1,500 on orders above ₹2,999"
+  }
+ ]
+}

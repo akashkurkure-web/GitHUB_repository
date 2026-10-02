@@ -1,5 +1,7 @@
-node_modules
-data
 .git
+.venv
+data
+staticfiles
 .env
-tests
+__pycache__
+*.pyc
