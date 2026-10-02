@@ -175,7 +175,7 @@ SQLite comfortably serves a single-server store. For multi-server or high traffi
 
 ## 6. Design system
 
-The storefront follows its own design language, **"Warm Bazaar"**, documented in [`DESIGN.md`](DESIGN.md). It sets a cream background, clay and peacock-teal colours, Fraunces and Manrope type, a light header, chip navigation, split hero, two-column product page and checkout stepper.
+The storefront follows its own professional, compact design system, documented in [`DESIGN.md`](DESIGN.md): the Inter typeface, teal brand colour with a single clay primary action, 4px corners, bordered surfaces, tight spacing and no decorative icons.
 These rules keep the site visually distinct from other marketplaces. Run the checklist at the end of `DESIGN.md` for any new screen.
 
 ## 6a. Project structure
@@ -202,7 +202,7 @@ tests/api.test.js      Integration & security tests (npm test)
 | Want to change... | Where |
 |---|---|
 | Store name | `STORE_NAME` env var + logo text in `public/index.html` |
-| Look & feel | Follow [`DESIGN.md`](DESIGN.md) (the "Warm Bazaar" design rules); tokens are CSS variables at the top of `public/styles.css` |
+| Look & feel | Follow [`DESIGN.md`](DESIGN.md); tokens are CSS variables at the top of `public/styles.css` |
 | Free-delivery threshold, shipping fee, COD limit, return window | `src/config.js` |
 | Products, categories, coupons | Bazaario Studio UI (or `src/seed.js` for the initial catalog) |
 | Real product photos | Add an `image_url` column, put images in `public/img/`, render an `<img>` in `productCard()`. Keep images same-origin or add your CDN to `img-src` in the CSP |

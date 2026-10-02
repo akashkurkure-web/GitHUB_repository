@@ -1,111 +1,105 @@
-# Bazaario Design System: "Warm Bazaar"
+# Bazaario Design System
 
-Bazaario should feel like a **calm, crafted Indian bazaar**: warm cream paper, clay and peacock-teal colours, editorial serif headlines, soft rounded surfaces.
-It must **never** be mistaken for Amazon (dark navy bar, yellow and orange buttons, dense grey utility layout) or Flipkart (blue and yellow).
-Every rule below is written as **Do / Don't** so that reviewers can check a screen against it.
+Bazaario should look **professional, compact and trustworthy**: clean white surfaces, a single sans-serif typeface, square-ish corners and tight, consistent spacing.
+It must also stay **visually distinct from Amazon** (dark navy header, yellow and orange buttons) and Flipkart (blue and yellow).
+Every rule below can be checked against a screen.
 
 ---
 
-## 1. Personality
+## 1. Principles
 
-| Bazaario is... | ...not |
+| Do | Don't |
 |---|---|
-| Warm, airy, editorial | Dense, utilitarian, "catalog dump" |
-| Few, confident choices per screen | Many competing badges and links |
-| Friendly words ("bag", "steals") | Retail jargon ("Proceed to Buy", "Account & Lists") |
+| Information-dense, scannable layouts | Large empty gaps and oversized hero sections |
+| Text labels for navigation and actions | Decorative emoji or icons next to labels |
+| One clear primary action per view | Several competing coloured buttons |
+| Plain, professional wording ("Deals", "Checkout") | Playful or slang copy |
 
 ## 2. Colour
 
 | Token | Hex | Use |
 |---|---|---|
-| `--paper` | `#FAF6EF` | Page background (warm cream, never grey) |
-| `--surface` | `#FFFFFF` | Cards |
-| `--ink` | `#221C17` | Text and prices |
-| `--ink-soft` | `#6B6158` | Secondary text |
-| `--clay` | `#B8482E` | **Primary action** (Add to bag, Checkout, Place order) |
-| `--teal` | `#0F5E5B` | Brand colour: logo, links, ratings, footer, secondary buttons |
-| `--saffron` | `#F2B544` | Highlights only: "Steal" tags, savings, focus ring |
-| `--leaf` | `#2F7D4F` | Success / in stock |
-| `--line` | `#EBE3D7` | Hairline borders |
+| `--paper` | `#F6F5F2` | Page background (neutral warm grey) |
+| `--surface` | `#FFFFFF` | Cards, header, panels |
+| `--ink` | `#1F1D1A` | Body text, prices |
+| `--ink-soft` | `#625D57` | Secondary text, labels |
+| `--teal` | `#0F5E5B` | Brand: logo, links, rating badge, secondary buttons, footer |
+| `--clay` | `#B8482E` | **Primary action only** (Add to bag, Checkout, Place order) and the "Deal" tag |
+| `--leaf` | `#2F7D4F` | Savings, in stock, success |
+| `--saffron` | `#F2B544` | Focus ring only |
+| `--line` / `--line-strong` | `#E3E0DA` / `#D2CEC6` | Borders and dividers |
 
-- **Do** use exactly one clay button per view for the main action. All other actions use the teal outline.
-- **Don't** use yellow or orange buttons, a navy or black header, or blue links.
-- **Don't** colour discounts red. Savings are shown in saffron, never as a red "−57%".
+- Exactly **one clay button** per view. Every other button is a teal outline or plain.
+- No yellow or orange buttons and no dark navy header.
+- Discounts are shown as **green "Save ₹X · N%"** text, never as a red "−N%".
 
 ## 3. Typography
 
-| Role | Font | Size / weight |
-|---|---|---|
-| Display & headings | **Fraunces** (serif) | 40 / 30 / 22 px, weight 600 |
-| UI & body | **Manrope** (sans) | 15 px base, weights 400-800 |
-| Prices | Manrope 800 | Tabular figures; no superscript ₹ |
+- **One typeface: Inter** (self-hosted), with weights 400, 500, 600 and 700. No serif or display fonts, and no italics for decoration.
+- Sizes: base **14px**; h1 22px; h2 18px; h3 15px; small/meta 12px; section labels 11px uppercase.
+- Headings use weight 600. Prices use weight 700 with tabular figures.
 
-- **Do** use the serif for page titles, section headings, product titles on the product page, and the logo.
-- **Don't** use the serif in buttons, forms or tables.
-- Section headings are sentence case with a short italic tagline, e.g. *"Bazaar steals - handpicked, while stocks last"*.
+## 4. Shape and depth
 
-## 4. Shape, depth, spacing
-
-- Radius: cards **18px**, images **16px**, buttons and inputs **12px**, chips **999px**.
-  Buttons are **rounded rectangles, not pills**.
-- Depth: one soft shadow, `0 6px 24px rgba(34,28,23,.06)`. Cards lift 2px on hover.
-- Spacing scale: 4, 8, 12, 16, 24, 32, 48 px. Sections are separated by **48px** of air, not by grey bands.
-- **Don't** use hard 1px grey boxes around everything, or bevelled or gradient buttons.
-
-## 5. Layout signatures (what makes it recognisably Bazaario)
-
-| Area | Bazaario pattern | Avoid (Amazon pattern) |
-|---|---|---|
-| Header | **Light** cream header; logo, a large centred rounded search, then icon + label links (Account, Orders, Wishlist, Bag) | Dark bar with "Deliver to", "Hello, sign in / Account & Lists", "Returns & Orders" |
-| Delivery PIN | Slim announcement strip above the header ("Delivering to 411001 · change") | PIN block inside the header |
-| Categories | Scrollable **chip row** with emoji icons under the header | Dark sub-navigation bar of text links |
-| Home | **Split hero** (serif headline + CTA on the left, product collage on the right), then a "Shop by category" circle row, then product grids | Full-width rotating carousel with 2x2 category cards overlapping it |
-| Product card | Big rounded image, **heart button on the image**, brand above title, teal rating chip "4.4 ★", price + struck MRP + saffron "Save ₹X" | Orange star strings, red "−%" figure, yellow "Add to cart" |
-| Product page | **Two columns**: sticky gallery, plus one info column holding a purchase card | Three columns with a separate right-hand buy box |
-| Checkout | **Progress stepper** (Bag → Address → Payment → Done) at the top | Numbered grey boxes |
-| Footer | Teal footer with a newsletter sign-up and three link columns | "Back to top" band, then four dense link columns |
-
-## 6. Vocabulary
-
-| Use | Instead of |
+| Element | Radius |
 |---|---|
-| Bag, Add to bag, Your bag | Cart, Add to Cart, Shopping Cart |
-| Checkout | Proceed to Buy |
-| Buy now | Buy Now (title-case buttons) |
-| Bazaar steals | Today's Deals |
+| Buttons, inputs, tags, chips | **4px** |
+| Cards, panels, images | **6px** (images 4px) |
+| Avatars, stepper dots | Circle (the only round elements) |
+
+- Separate surfaces with **1px borders**, not floating shadows. A shadow appears only on hover (product cards) and on popovers (search suggestions, dialogs, toasts).
+
+## 5. Spacing (compact)
+
+| Use | Value |
+|---|---|
+| Between sections | 24px |
+| Grid gap (product cards, tiles) | 12px (8px on mobile) |
+| Card padding | 16px (product cards 8px) |
+| Control height | 36px (small 28px) |
+| Header padding | 8px 20px |
+
+Spacing scale: **4 · 8 · 12 · 16 · 24 · 32**. Don't use values outside this scale.
+
+## 6. Icons
+
+- **Allowed:** product images, the ★ inside rating badges and the star-rating input, and the ♡ wishlist toggle on product images.
+- **Not allowed:** emoji or icons in the header, navigation, buttons, headings, trust badges, empty states, account tiles or alerts. Use text.
+
+## 7. Layout signatures
+
+| Area | Pattern |
+|---|---|
+| Top strip | Thin teal bar: service promises (left), "Deliver to: PIN" (right) |
+| Header | White; logo, square search field with category selector and teal Search button, text links (Sign in · Orders · Wishlist · Bag with count) |
+| Category nav | Text tabs on white with an underline on hover; "Deals" in clay |
+| Home | Compact hero card (headline, two buttons, three product tiles), category text tiles, product grids with a section header and "View all" |
+| Product card | Image, Deal tag, wishlist toggle, brand (uppercase), 2-line title, rating badge, price + MRP + green savings, delivery line, outline "Add to bag" |
+| Product page | Image column (max 420px) + info column with a bordered purchase panel |
+| Checkout | Three-step progress (Bag → Delivery & payment → Order placed), numbered sections, sticky order summary |
+| Admin (Bazaario Studio) | Underlined tabs, bordered stat tiles, bordered tables |
+
+## 8. Vocabulary
+
+| Use | Avoid |
+|---|---|
+| Bag, Add to bag, Checkout | Cart, Proceed to Buy |
+| Deals, Deals of the day | Today's Deals, Bazaar steals |
 | Sign in / Hi, Priya | Hello, sign in / Account & Lists |
-| Orders | Returns & Orders |
-| What shoppers say | Customer reviews |
+| Orders, My account | Returns & Orders, Your Account |
 | Verified buyer | Verified Purchase |
 | Bazaario Studio | Seller Central |
-| My account | Your Account |
 
-## 7. Components
+## 9. Accessibility
 
-- **Primary button**: clay background, white text, 12px radius, 44px tall, weight 700; on hover the background darkens 8%.
-- **Secondary button**: white with a 1.5px teal border and teal text.
-- **Ghost button**: text only, teal.
-- **Rating chip**: teal background, white "4.4 ★", followed by the count in `--ink-soft`.
-- **Steal tag**: saffron background, ink text, pill, top-left of the image.
-- **Inputs**: 12px radius, `--line` border, 44px tall; focus shows a **3px saffron ring**.
-- **Toast**: teal, bottom-right, rounded 14px. Errors use clay.
-
-## 8. Imagery & icons
-
-- Product images sit on a soft tinted square (category colour at low saturation) with a 16px radius.
-- Icons are emoji or line icons at one consistent size. Never use mixed icon styles in one row.
-
-## 9. Accessibility (non-negotiable)
-
-- Text contrast is at least 4.5:1. Ink on paper is 15.6:1; white on clay is 5.2:1; white on teal is 7.6:1; soft ink on paper is 5.6:1.
-- Every interactive element shows the saffron focus ring.
-- Tap targets are at least 44px. Layouts work at 360px width.
+- Contrast: ink on paper 15.6:1; white on clay 5.2:1; white on teal 7.6:1; soft ink on paper above 4.5:1.
+- Visible 2px saffron focus ring on every interactive element.
+- Layouts work from 360px width.
 
 ## 10. Review checklist
 
-Before shipping a screen, check:
-1. Is there exactly one clay primary action?
-2. Are there any yellow or orange buttons, dark header bars or red discount figures? (There should be none.)
-3. Do headings use Fraunces, and do buttons and forms use Manrope?
-4. Is the copy from the vocabulary table?
-5. Do focus rings and contrast meet section 9?
+1. Is there exactly one clay button on the screen?
+2. Are there any decorative icons or emoji outside product images, ratings and the wishlist toggle? (There should be none.)
+3. Are button and input corners 4px, and card corners 6px?
+4. Do gaps follow the 4/8/12/16/24 scale, with sections 24px apart?
+5. Is all text in Inter and all copy from the vocabulary table?
