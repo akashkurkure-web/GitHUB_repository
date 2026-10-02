@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Travel ETA Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#667085; --line:#e4e7ec;
+          --accent:#1a73e8; --warn:#b42318; --ok:#067647; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background:var(--bg); color:var(--text); }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  form { display:grid; grid-template-columns: 1fr 1fr 150px auto; gap:10px; align-items:end; }
+  label { font-size:13px; color:var(--muted); display:block; margin-bottom:4px; }
+  input, select { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  button { padding:9px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button.danger { background:transparent; color:var(--warn); border:1px solid var(--line); }
+  button:disabled { opacity:.6; cursor:wait; }
+  .banner { padding:10px 12px; border-radius:6px; background:#fffaeb; border:1px solid #fedf89; margin-bottom:16px; font-size:14px; }
+  .error { color:var(--warn); margin-top:10px; min-height:1em; }
+  .route-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .places { font-weight:600; }
+  .places span { color:var(--muted); font-weight:400; }
+  .eta { font-size:32px; font-weight:700; }
+  .meta { color:var(--muted); font-size:13px; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .pill { display:inline-block; font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); }
+  .pill.on { color:var(--ok); border-color:#abefc6; }
+  .chart-wrap { height:220px; margin-top:12px; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  details summary { cursor:pointer; color:var(--accent); margin-top:10px; font-size:14px; }
+  @media (max-width: 720px) { form { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Travel ETA Tracker</h1>
+  <p class="sub">Enter two places. Live travel time comes from Google Maps and is re-checked automatically every <b id="interval">60</b> minutes.</p>
+  <div id="mock" class="banner" hidden>Mock mode: no <code>GOOGLE_MAPS_API_KEY</code> configured, so travel times are simulated. Add your key to <code>.env</code> and restart.</div>
+
+  <div class="card">
+    <form id="form">
+      <div><label for="origin">From</label><input id="origin" placeholder="e.g. Hinjewadi Phase 1, Pune" required></div>
+      <div><label for="destination">To</label><input id="destination" placeholder="e.g. Pune Airport" required></div>
+      <div><label for="mode">Mode</label>
+        <select id="mode">
+          <option value="DRIVE">Car</option>
+          <option value="TWO_WHEELER">Two-wheeler</option>
+          <option value="TRANSIT">Transit</option>
+          <option value="BICYCLE">Bicycle</option>
+          <option value="WALK">Walk</option>
+        </select></div>
+      <button id="submit" type="submit">Get travel time</button>
+    </form>
+    <div id="formError" class="error"></div>
+  </div>
+
+  <div id="routes"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const charts = {};
+
+const fmtMin = (sec) => sec == null ? "–" : (sec >= 3600
+  ? `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`
+  : `${Math.round(sec / 60)} min`);
+const fmtTime = (iso) => new Date(iso).toLocaleString();
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function routeCard(r) {
+  const l = r.latest || {};
+  const delay = l.duration_sec != null && l.static_duration_sec != null
+    ? l.duration_sec - l.static_duration_sec : null;
+  return `
+  <div class="card" id="route-${r.id}">
+    <div class="route-head">
+      <div>
+        <div class="places">${esc(r.origin_address)} <span>→</span> ${esc(r.dest_address)}</div>
+        <div class="meta">${r.travel_mode} · ${r.sample_count} samples ·
+          <span class="pill ${r.active ? "on" : ""}">${r.active ? "tracking" : "paused"}</span></div>
+      </div>
+      <div style="text-align:right">
+        <div class="eta">${l.error ? "Error" : fmtMin(l.duration_sec)}</div>
+        <div class="meta">${l.error ? esc(l.error) : [
+          l.distance_m != null ? (l.distance_m / 1000).toFixed(1) + " km" : "",
+          delay != null && delay > 60 ? `+${fmtMin(delay)} traffic` : "",
+          l.checked_at ? "at " + fmtTime(l.checked_at) : ""].filter(Boolean).join(" · ")}</div>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart-${r.id}"></canvas></div>
+    <details><summary>Hourly log</summary><div id="table-${r.id}"></div></details>
+    <div class="actions">
+      <button class="ghost" data-act="check" data-id="${r.id}">Check now</button>
+      <button class="ghost" data-act="toggle" data-id="${r.id}">${r.active ? "Pause" : "Resume"} tracking</button>
+      <a href="/api/routes/${r.id}/export.csv"><button class="ghost" type="button">Download CSV</button></a>
+      <button class="danger" data-act="delete" data-id="${r.id}">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function drawHistory(id) {
+  const samples = await api(`/api/routes/${id}/samples`);
+  const ok = samples.filter((s) => s.duration_sec != null);
+  const ctx = document.getElementById(`chart-${id}`);
+  if (charts[id]) charts[id].destroy();
+  if (typeof Chart === "undefined") { ctx.parentElement.hidden = true; } // offline: table only
+  else charts[id] = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: ok.map((s) => new Date(s.checked_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+      datasets: [
+        { label: "ETA with traffic (min)", data: ok.map((s) => +(s.duration_sec / 60).toFixed(1)), borderColor: "#1a73e8", backgroundColor: "#1a73e8", tension: 0.25 },
+        { label: "No-traffic baseline (min)", data: ok.map((s) => s.static_duration_sec == null ? null : +(s.static_duration_sec / 60).toFixed(1)), borderColor: "#98a2b3", borderDash: [4, 4], pointRadius: 0 },
+      ],
+    },
+    options: { maintainAspectRatio: false, scales: { y: { beginAtZero: false, title: { display: true, text: "minutes" } } } },
+  });
+  document.getElementById(`table-${id}`).innerHTML = `<table>
+    <tr><th>Checked at</th><th>ETA</th><th>No traffic</th><th>Distance</th><th>Note</th></tr>
+    ${samples.slice().reverse().map((s) => `<tr><td>${fmtTime(s.checked_at)}</td><td>${fmtMin(s.duration_sec)}</td>
+      <td>${fmtMin(s.static_duration_sec)}</td><td>${s.distance_m != null ? (s.distance_m / 1000).toFixed(1) + " km" : "–"}</td>
+      <td>${s.error ? esc(s.error) : ""}</td></tr>`).join("")}</table>`;
+}
+
+async function refresh() {
+  const routes = await api("/api/routes");
+  $("#routes").innerHTML = routes.length ? routes.map(routeCard).join("")
+    : `<p class="sub">No routes yet. Add two places above to start tracking.</p>`;
+  for (const r of routes) drawHistory(r.id);
+}
+
+$("#form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#formError").textContent = "";
+  $("#submit").disabled = true;
+  try {
+    await api("/api/routes", { method: "POST", body: JSON.stringify({
+      origin: $("#origin").value, destination: $("#destination").value, travel_mode: $("#mode").value }) });
+    $("#form").reset();
+    await refresh();
+  } catch (err) {
+    $("#formError").textContent = err.message;
+  } finally {
+    $("#submit").disabled = false;
+  }
+});
+
+$("#routes").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const { act, id } = btn.dataset;
+  if (act === "delete" && !confirm("Delete this route and all its history?")) return;
+  btn.disabled = true;
+  try {
+    if (act === "delete") await api(`/api/routes/${id}`, { method: "DELETE" });
+    else await api(`/api/routes/${id}/${act}`, { method: "POST" });
+    await refresh();
+  } catch (err) { alert(err.message); btn.disabled = false; }
+});
+
+api("/api/config").then((c) => {
+  $("#interval").textContent = c.interval_minutes;
+  $("#mock").hidden = !c.mock;
+});
+refresh();
+setInterval(refresh, 5 * 60 * 1000); // pick up new hourly samples without reloading
+</script>
+</body>
+</html>
