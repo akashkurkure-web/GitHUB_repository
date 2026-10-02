@@ -71,6 +71,8 @@ function createApp() {
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found.')));
 
   app.use('/api', api);
+  // Self-hosted web fonts (Fraunces + Manrope), so the CSP can stay 'self'-only.
+  app.use('/fonts', express.static(path.join(__dirname, 'node_modules', '@fontsource'), { maxAge: '30d', immutable: true }));
   app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html', maxAge: config.isProd ? '1h' : 0 }));
   // SPA fallback (hash routing, so only "/" really needs it).
   app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

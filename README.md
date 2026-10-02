@@ -49,7 +49,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 
 | Area | Features |
 |---|---|
-| **Header** | Logo, "Deliver to" PIN code selector, category-scoped search with live suggestions, Account & Lists, Returns & Orders, cart badge |
+| **Header** | Delivery strip with PIN code, logo, rounded search with live suggestions and category scope, Account · Orders · Wishlist · Bag icons, category chips |
 | **Home** | Auto-rotating hero banners, category tiles, Today's Deals carousel, top rated, browsing history |
 | **Search / listing** | Keyword search, category, brand facets, price ranges & custom range, rating "& Up", Express delivery, deals, in-stock filters; 6 sort orders; pagination |
 | **Product page** | Price / MRP / % off, "Inclusive of all taxes", EMI, coupon offers, PIN-code delivery check, stock status, qty, Add to Cart, Buy Now, Wish List, feature bullets, related products |
@@ -58,7 +58,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 | **Checkout** | Address book with Indian states & PIN validation, UPI / Card (Luhn + expiry) / Cash on Delivery (₹50,000 cap), coupons, free delivery over ₹499, savings summary, idempotent "Place order" (no double orders) |
 | **Orders** | Order history, details, tracking stepper (Placed → Packed → Shipped → Delivered), cancel (auto-refund + restock), 10-day return window, Buy it again |
 | **Account** | Profile, change password (signs out other devices), addresses, wish list |
-| **Seller Central (admin)** | Dashboard (revenue, open orders, low stock), order fulfilment workflow, product CRUD, customers, coupons, security audit log |
+| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, low stock), order fulfilment workflow, product CRUD, customers, coupons, security audit log |
 
 ## 2. Security controls
 
@@ -73,7 +73,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 | Price / business-logic tampering | Prices, discounts, shipping and totals are recomputed on the server; client prices are ignored; stock decremented atomically in a transaction (no overselling); order-status state machine |
 | Sensitive data exposure | Card numbers never stored (only last 4 digits); no stack traces leaked; `Cache-Control: no-store` on API |
 | Security misconfiguration | Helmet headers (HSTS, frame-ancestors, nosniff, Referrer-Policy, Permissions-Policy); `x-powered-by` removed; JSON body limit 50 KB; non-root Docker user |
-| Logging & monitoring | `audit_log` table for logins, lockouts, orders, cancellations, admin changes (viewable in Seller Central) |
+| Logging & monitoring | `audit_log` table for logins, lockouts, orders, cancellations, admin changes (viewable in Bazaario Studio) |
 
 > **Payments:** the bundled gateway is a validating **mock** (no money moves). For go-live, see Section 5, step 6.
 
@@ -108,11 +108,11 @@ $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm st
 
 **Step 5: Open the store**
 - Shop: <http://localhost:3000>
-- Seller Central: sign in with the admin account → **Account & Lists → Seller / Admin Central** (or `#/admin`).
+- Bazaario Studio (admin): sign in with the admin account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
 
 **Step 6: Try a test purchase**
 1. Register a customer account (top right → *Start here*).
-2. Add a product → **Proceed to Buy** → add an address (any valid 6-digit PIN, 10-digit mobile starting 6-9).
+2. Add a product → **Checkout** → add an address (any valid 6-digit PIN, 10-digit mobile starting 6-9).
 3. Pay with UPI `test@okbank`, or card `4111 1111 1111 1111` with any future expiry like `12/30` and any CVV, or COD.
 4. Apply coupon `WELCOME10`, `SAVE100` or `FESTIVE15`.
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
@@ -173,7 +173,12 @@ SQLite comfortably serves a single-server store. For multi-server or high traffi
 
 ---
 
-## 6. Project structure
+## 6. Design system
+
+The storefront follows its own design language, **"Warm Bazaar"**, documented in [`DESIGN.md`](DESIGN.md). It sets a cream background, clay and peacock-teal colours, Fraunces and Manrope type, a light header, chip navigation, split hero, two-column product page and checkout stepper.
+These rules keep the site visually distinct from other marketplaces. Run the checklist at the end of `DESIGN.md` for any new screen.
+
+## 6a. Project structure
 
 ```
 server.js              Express app: security headers, rate limiting, routing, error handler
@@ -186,8 +191,9 @@ src/routes/auth.js     Register, login, logout, profile, change password
 src/routes/catalog.js  Categories, search & facets, product detail, reviews
 src/routes/shopping.js Cart, save-for-later, guest-cart merge, wishlist, addresses
 src/routes/orders.js   Checkout quote, payment, place/cancel/return orders
-src/routes/admin.js    Seller Central APIs
+src/routes/admin.js    Bazaario Studio (admin) APIs
 public/                Storefront SPA (index.html, app.js, styles.css)
+DESIGN.md              Design rules (colours, type, layout, vocabulary, checklist)
 tests/api.test.js      Integration & security tests (npm test)
 ```
 
@@ -196,7 +202,7 @@ tests/api.test.js      Integration & security tests (npm test)
 | Want to change... | Where |
 |---|---|
 | Store name | `STORE_NAME` env var + logo text in `public/index.html` |
-| Brand colours | CSS variables at the top of `public/styles.css` |
+| Look & feel | Follow [`DESIGN.md`](DESIGN.md) (the "Warm Bazaar" design rules); tokens are CSS variables at the top of `public/styles.css` |
 | Free-delivery threshold, shipping fee, COD limit, return window | `src/config.js` |
-| Products, categories, coupons | Seller Central UI (or `src/seed.js` for the initial catalog) |
+| Products, categories, coupons | Bazaario Studio UI (or `src/seed.js` for the initial catalog) |
 | Real product photos | Add an `image_url` column, put images in `public/img/`, render an `<img>` in `productCard()`. Keep images same-origin or add your CDN to `img-src` in the CSP |

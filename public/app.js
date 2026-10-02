@@ -30,7 +30,6 @@ const mount = (...nodes) => { app.replaceChildren(...nodes); app.focus({ prevent
 // ---------------- Formatting ----------------
 const inr = (paise) => '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: paise % 100 ? 2 : 0, maximumFractionDigits: 2 });
 const pct = (p) => Math.round(((p.mrp - p.price) / p.mrp) * 100);
-const stars = (r) => '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r));
 const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
 const deliveryDate = (express) => {
   const d = new Date(Date.now() + (express ? 1 : 4) * 86400000);
@@ -42,11 +41,15 @@ const STATUS_LABEL = {
 };
 
 function priceBlock(p, big) {
-  const rupees = Math.floor(p.price / 100);
-  return h('div', null,
-    p.mrp > p.price ? h('span', { class: 'off' }, `-${pct(p)}%`) : null,
-    h('span', { class: big ? 'price' : 'price-sm' }, h('sup', null, '₹'), rupees.toLocaleString('en-IN')),
-    p.mrp > p.price ? h('div', { class: 'muted' }, 'M.R.P.: ', h('span', { class: 'mrp' }, inr(p.mrp))) : null);
+  return h('div', { class: 'pricing' + (big ? ' pricing-lg' : '') },
+    h('span', { class: 'now' }, inr(p.price)),
+    p.mrp > p.price ? [h('span', { class: 'was', 'aria-label': `MRP ${inr(p.mrp)}` }, inr(p.mrp)),
+      h('span', { class: 'save' }, `Save ${inr(p.mrp - p.price)} · ${pct(p)}%`)] : null);
+}
+
+function ratingChip(p) {
+  return h('span', { class: 'rating-wrap' }, h('span', { class: 'rating' }, `${p.rating_avg.toFixed(1)} ★`),
+    h('span', { class: 'muted' }, `(${p.rating_count.toLocaleString('en-IN')})`));
 }
 
 // ---------------- API client ----------------
@@ -104,14 +107,15 @@ async function updateCartCount() {
     state.cartCount = guestCart().reduce((s, i) => s + i.qty, 0);
   }
   $('#cart-count').textContent = state.cartCount;
+  $('#cart-count').classList.toggle('empty', !state.cartCount);
 }
 
 function renderHeader() {
   const link = $('#account-link');
-  $('#hello').textContent = state.user ? `Hello, ${state.user.name.split(' ')[0]}` : 'Hello, sign in';
+  $('#hello').textContent = state.user ? `Hi, ${state.user.name.split(' ')[0]}` : 'Sign in';
   link.href = state.user ? '#/account' : '#/login';
   const pin = store.get('pin', '');
-  $('#deliver-pin').textContent = pin ? `📍 ${pin}` : '📍 Select PIN code';
+  $('#deliver-pin').textContent = pin || 'add PIN code';
   updateCartCount();
 }
 
@@ -150,7 +154,7 @@ async function addToCart(product, qty = 1, buyNow = false) {
     await updateCartCount();
     if (buyNow) {
       location.hash = state.user ? '#/checkout' : '#/login?next=' + encodeURIComponent('#/checkout');
-    } else toast(`Added to cart: ${product.title.slice(0, 50)}`);
+    } else toast(`Added to your bag: ${product.title.slice(0, 50)}`);
   } catch (e) { fail(e); }
 }
 
@@ -158,75 +162,70 @@ async function toggleWishlist(product, btn) {
   if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent(location.hash); return; }
   try {
     await api('POST', '/wishlist', { productId: product.id });
-    toast('Added to your Wish List');
-    if (btn) btn.textContent = '♥ In your Wish List';
+    toast('Saved to your wishlist');
+    if (btn) { btn.textContent = btn.classList.contains('heart') ? '♥' : '♥ Saved to wishlist'; btn.classList.add('on'); }
   } catch (e) { fail(e); }
 }
 
 // ---------------- Product card ----------------
 function productCard(p, { compact } = {}) {
   const url = `#/p/${p.id}`;
-  return h('div', { class: 'pcard' },
-    h('a', { href: url, 'aria-label': p.title },
-      h('div', { class: 'pimg', style: { background: p.color } },
-        p.is_deal ? h('span', { class: 'badge badge-deal' }, 'Limited time deal') : null, p.emoji)),
-    h('a', { class: 'title', href: url }, p.title),
-    h('div', null, h('span', { class: 'stars' }, stars(p.rating_avg)), ' ',
-      h('a', { href: url + '#reviews', class: 'muted' }, p.rating_count.toLocaleString('en-IN'))),
-    priceBlock(p),
-    p.express ? h('div', null, h('span', { class: 'badge badge-express' }, '⚡ Express'), ' ', h('span', { class: 'muted' }, 'Get it by tomorrow')) : h('div', { class: 'muted' }, `FREE delivery ${deliveryDate(false).split(',')[0]}`),
-    p.stock === 0 ? h('div', { class: 'err' }, 'Currently unavailable') : p.stock < 10 ? h('div', { class: 'err' }, `Only ${p.stock} left in stock.`) : null,
-    compact || p.stock === 0 ? null : h('button', { class: 'btn btn-primary btn-sm', onclick: () => addToCart(p) }, 'Add to cart'));
+  return h('article', { class: 'pcard' },
+    h('div', { class: 'pimg-wrap' },
+      h('a', { href: url, 'aria-label': p.title, tabIndex: -1 },
+        h('div', { class: 'pimg', style: { background: p.color } }, p.emoji)),
+      p.is_deal ? h('span', { class: 'tag-steal' }, '✦ Steal') : null,
+      h('button', { class: 'heart', type: 'button', 'aria-label': 'Save to wishlist', onclick: (e) => toggleWishlist(p, e.currentTarget) }, '♡')),
+    h('div', { class: 'pbody' },
+      p.brand ? h('div', { class: 'brand' }, p.brand) : null,
+      h('a', { class: 'title', href: url }, p.title),
+      ratingChip(p),
+      priceBlock(p),
+      h('div', { class: 'ship' }, p.express ? '⚡ Delivery tomorrow' : `Free delivery by ${deliveryDate(false).split(',')[0]}`),
+      p.stock === 0 ? h('div', { class: 'err' }, 'Out of stock') : p.stock < 10 ? h('div', { class: 'low' }, `Only ${p.stock} left`) : null,
+      compact || p.stock === 0 ? null : h('button', { class: 'btn btn-outline btn-block', onclick: () => addToCart(p) }, 'Add to bag')));
 }
 
 // ---------------- Views ----------------
-const SLIDES = [
-  { bg: 'linear-gradient(110deg,#0b3d2e,#1f7a5c)', title: 'Great Festive Sale is LIVE', text: 'Up to 70% off on electronics, fashion & home. Extra 10% off with code WELCOME10.', big: '🎉', link: '#/s?deals=1' },
-  { bg: 'linear-gradient(110deg,#3b1d6e,#7e3fbf)', title: 'Smartphones from ₹7,499', text: 'No-cost EMI · Exchange offers · Express delivery in 1 day', big: '📱', link: '#/s?category=mobiles' },
-  { bg: 'linear-gradient(110deg,#8a3b00,#e07a1f)', title: 'Kitchen upgrades under ₹2,999', text: 'Air fryers, mixer grinders, cookware and more', big: '🍳', link: '#/s?category=home-kitchen' },
-];
-
 async function viewHome() {
-  let idx = 0;
-  const slides = SLIDES.map((s, i) => h('a', { class: 'slide' + (i === 0 ? ' active' : ''), href: s.link, style: { background: s.bg } },
-    h('h2', null, s.title), h('p', null, s.text), h('span', { class: 'big' }, s.big)));
-  const show = (n) => { slides[idx].classList.remove('active'); idx = (n + slides.length) % slides.length; slides[idx].classList.add('active'); };
-  const hero = h('div', { class: 'hero' }, slides,
-    h('button', { class: 'hero-nav prev', 'aria-label': 'Previous', onclick: () => show(idx - 1) }, '‹'),
-    h('button', { class: 'hero-nav next', 'aria-label': 'Next', onclick: () => show(idx + 1) }, '›'));
-  state.timers.push(setInterval(() => show(idx + 1), 5000));
-
   const [deals, best, all] = await Promise.all([
-    api('GET', '/products?deals=1&limit=12&sort=discount'),
-    api('GET', '/products?sort=rating&limit=12'),
+    api('GET', '/products?deals=1&limit=8&sort=discount'),
+    api('GET', '/products?sort=rating&limit=8'),
     api('GET', '/products?limit=48'),
   ]);
-  const byCat = {};
-  for (const p of all.items) (byCat[p.category] ||= []).push(p);
-  const tiles = state.categories.slice(0, 8).map((c) => {
-    const ps = (byCat[c.slug] || []).slice(0, 4);
-    return h('div', { class: 'card tile' },
-      h('h3', null, `${c.icon} ${c.name}`),
-      h('div', { class: 'tile-grid' }, ps.map((p) => h('a', { href: `#/p/${p.id}` },
-        h('div', { class: 'tile-img', style: { background: p.color } }, p.emoji), p.title.split(' ').slice(0, 3).join(' ')))),
-      h('p', null, h('a', { href: `#/s?category=${c.slug}` }, 'See more')));
-  });
-
+  const collage = deals.items.slice(0, 4);
   const recentIds = store.get('recent', []);
   const recent = all.items.filter((p) => recentIds.includes(p.id)).sort((a, b) => recentIds.indexOf(a.id) - recentIds.indexOf(b.id));
+  const section = (title, tagline, link, items) => h('section', { class: 'section' },
+    h('div', { class: 'section-head' }, h('div', null, h('h2', null, title), h('p', { class: 'tagline' }, tagline)),
+      link ? h('a', { class: 'btn btn-ghost', href: link }, 'View all →') : null),
+    h('div', { class: 'grid' }, items.map((p) => productCard(p))));
 
-  mount(hero,
-    h('div', { class: 'tiles' }, tiles),
-    h('div', { class: 'card row-card' }, h('div', { class: 'section-title' }, h('h2', null, "Today's Deals"), h('a', { href: '#/s?deals=1' }, 'See all deals')),
-      h('div', { class: 'scroller' }, deals.items.map((p) => productCard(p, { compact: true })))),
-    h('div', { class: 'card row-card' }, h('h2', null, 'Top rated by customers'),
-      h('div', { class: 'scroller' }, best.items.map((p) => productCard(p, { compact: true })))),
-    recent.length ? h('div', { class: 'card row-card' }, h('h2', null, 'Your browsing history'),
-      h('div', { class: 'scroller' }, recent.map((p) => productCard(p, { compact: true })))) : null,
-    state.user ? null : h('div', { class: 'card', style: { textAlign: 'center' } },
-      h('p', null, 'See personalized recommendations'),
-      h('a', { class: 'btn btn-primary', href: '#/login', style: { width: '240px' } }, 'Sign in'),
-      h('p', { class: 'hint' }, 'New customer? ', h('a', { href: '#/register' }, 'Start here.'))));
+  mount(
+    h('section', { class: 'hero' },
+      h('div', { class: 'hero-copy' },
+        h('span', { class: 'eyebrow' }, '✦ The festive bazaar is open'),
+        h('h1', null, 'Everything your home needs, ', h('em', null, 'delivered with care.')),
+        h('p', null, 'Handpicked brands, honest prices and doorstep delivery across India. New here? Take 10% off with ', h('b', null, 'WELCOME10'), '.'),
+        h('div', { class: 'hero-cta' },
+          h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Shop the steals'),
+          h('a', { class: 'btn btn-outline', href: '#/s?sort=newest' }, 'New arrivals'))),
+      h('div', { class: 'hero-collage', 'aria-hidden': 'true' }, collage.map((p, i) =>
+        h('a', { class: `collage-tile t${i}`, href: `#/p/${p.id}`, tabIndex: -1, style: { background: p.color } },
+          h('span', { class: 'collage-emoji' }, p.emoji), h('span', { class: 'collage-price' }, inr(p.price)))))),
+    h('section', { class: 'section' },
+      h('div', { class: 'section-head' }, h('div', null, h('h2', null, 'Shop by category'), h('p', { class: 'tagline' }, 'Ten aisles, one easy basket'))),
+      h('div', { class: 'cat-row' }, state.categories.map((c) => h('a', { class: 'cat', href: `#/s?category=${c.slug}` },
+        h('span', { class: 'cat-ic' }, c.icon), h('span', null, c.name))))),
+    section('Bazaar steals', 'Handpicked, while stocks last', '#/s?deals=1', deals.items),
+    h('section', { class: 'promo' },
+      h('div', null, h('h3', null, 'Free delivery, every day'), h('p', null, 'On orders above ₹499, with 10-day easy returns and Cash on Delivery.')),
+      h('div', { class: 'promo-badges' }, h('span', null, '🔒 Secure payments'), h('span', null, '↩️ Easy returns'), h('span', null, '✅ Genuine brands'))),
+    section('Most loved', 'Top rated by shoppers like you', '#/s?sort=rating', best.items),
+    recent.length ? section('Picked up where you left off', 'Recently viewed', null, recent.slice(0, 8)) : null,
+    state.user ? null : h('section', { class: 'signin-band' },
+      h('div', null, h('h3', null, 'Your bazaar, personalised'), h('p', null, 'Sign in for saved bags, wishlists and order tracking.')),
+      h('div', { class: 'hero-cta' }, h('a', { class: 'btn btn-primary', href: '#/login' }, 'Sign in'), h('a', { class: 'btn btn-outline', href: '#/register' }, 'Create account'))));
 }
 
 async function viewSearch(params) {
@@ -241,21 +240,20 @@ async function viewSearch(params) {
   };
   const brandsSel = (q.get('brand') || '').split(',').filter(Boolean);
   const cat = state.categories.find((c) => c.slug === q.get('category'));
-  const heading = q.get('q') ? `"${q.get('q')}"` : cat ? cat.name : q.get('deals') ? "Today's Deals" : 'All products';
+  const heading = q.get('q') ? `"${q.get('q')}"` : cat ? cat.name : q.get('deals') ? 'Bazaar steals' : 'All products';
 
   const minIn = h('input', { type: 'number', min: 0, placeholder: 'Min', value: q.get('min') || '' });
   const maxIn = h('input', { type: 'number', min: 0, placeholder: 'Max', value: q.get('max') || '' });
 
   const filters = h('aside', { class: 'filters', 'aria-label': 'Filters' },
     h('h4', null, 'Delivery'),
-    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('express') === '1', onchange: (e) => go({ express: e.target.checked ? '1' : null }) }), '⚡ Express (1-day)'),
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('express') === '1', onchange: (e) => go({ express: e.target.checked ? '1' : null }) }), '⚡ Delivery tomorrow'),
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('instock') === '1', onchange: (e) => go({ instock: e.target.checked ? '1' : null }) }), 'Include in-stock only'),
     h('h4', null, 'Category'),
     h('button', { class: 'f' + (!q.get('category') ? ' sel' : ''), onclick: () => go({ category: null }) }, 'Any category'),
     state.categories.map((c) => h('button', { class: 'f' + (c.slug === q.get('category') ? ' sel' : ''), onclick: () => go({ category: c.slug }) }, c.name)),
-    h('h4', null, 'Customer Review'),
-    [4, 3, 2].map((r) => h('button', { class: 'f' + (q.get('rating') === String(r) ? ' sel' : ''), onclick: () => go({ rating: q.get('rating') === String(r) ? null : r }) },
-      h('span', { class: 'stars' }, stars(r)), ' & Up')),
+    h('h4', null, 'Rating'),
+    h('div', { class: 'chip-set' }, [4, 3, 2].map((r) => h('button', { class: 'fchip' + (q.get('rating') === String(r) ? ' sel' : ''), onclick: () => go({ rating: q.get('rating') === String(r) ? null : r }) }, `${r}★ & above`))),
     data.brands.length ? h('h4', null, 'Brands') : null,
     data.brands.map((b) => h('label', { class: 'inline' }, h('input', {
       type: 'checkbox', checked: brandsSel.includes(b.brand),
@@ -265,16 +263,16 @@ async function viewSearch(params) {
       },
     }), `${b.brand} (${b.n})`)),
     h('h4', null, 'Price'),
-    [[0, 500], [500, 1000], [1000, 5000], [5000, 20000], [20000, null]].map(([a, b]) =>
-      h('button', { class: 'f', onclick: () => go({ min: a || null, max: b }) }, b ? `₹${a.toLocaleString('en-IN')} - ₹${b.toLocaleString('en-IN')}` : `Over ₹${a.toLocaleString('en-IN')}`)),
+    h('div', { class: 'chip-set' }, [[0, 500], [500, 1000], [1000, 5000], [5000, 20000], [20000, null]].map(([a, b]) =>
+      h('button', { class: 'fchip', onclick: () => go({ min: a || null, max: b }) }, b ? `₹${a.toLocaleString('en-IN')}–${b.toLocaleString('en-IN')}` : `₹${a.toLocaleString('en-IN')}+`))),
     h('div', { class: 'price-range' }, minIn, maxIn, h('button', { class: 'btn btn-sm', onclick: () => go({ min: minIn.value || null, max: maxIn.value || null }) }, 'Go')),
-    h('h4', null, 'Deals & Discounts'),
-    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('deals') === '1', onchange: (e) => go({ deals: e.target.checked ? '1' : null }) }), "Today's Deals"),
-    h('p', null, h('a', { href: '#/s' }, 'Clear all filters')));
+    h('h4', null, 'Offers'),
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('deals') === '1', onchange: (e) => go({ deals: e.target.checked ? '1' : null }) }), 'Bazaar steals only'),
+    h('p', null, h('a', { class: 'btn btn-ghost', href: '#/s' }, 'Clear all filters')));
 
   const start = (data.page - 1) * data.pageSize + 1;
   const sortSel = h('select', { 'aria-label': 'Sort by', onchange: (e) => go({ sort: e.target.value }) },
-    [['relevance', 'Featured'], ['price-asc', 'Price: Low to High'], ['price-desc', 'Price: High to Low'], ['rating', 'Avg. Customer Review'], ['newest', 'Newest Arrivals'], ['discount', 'Discount']]
+    [['relevance', 'Recommended'], ['price-asc', 'Price: Low to High'], ['price-desc', 'Price: High to Low'], ['rating', 'Avg. Customer Review'], ['newest', 'Newest Arrivals'], ['discount', 'Discount']]
       .map(([v, l]) => h('option', { value: v, selected: (q.get('sort') || 'relevance') === v }, l)));
 
   const pager = data.pages > 1 ? h('div', { class: 'pager' },
@@ -285,10 +283,10 @@ async function viewSearch(params) {
   mount(h('div', { class: 'search-layout' }, filters,
     h('section', null,
       h('div', { class: 'results-bar' },
-        h('span', null, data.total ? `${start}-${Math.min(start + data.pageSize - 1, data.total)} of ${data.total} results for ` : 'No results for ', h('b', { class: 'err' }, heading)),
+        h('div', null, h('h1', { class: 'results-title' }, heading), h('span', { class: 'muted' }, data.total ? `Showing ${start}–${Math.min(start + data.pageSize - 1, data.total)} of ${data.total} products` : 'No products found')),
         h('label', { class: 'inline' }, 'Sort by: ', sortSel)),
       data.items.length ? h('div', { class: 'grid' }, data.items.map((p) => productCard(p)))
-        : h('div', { class: 'card' }, h('h2', null, 'No results found'), h('p', null, 'Try checking your spelling or use more general terms.')),
+        : h('div', { class: 'card empty' }, h('div', { class: 'empty-ic' }, '🧺'), h('h2', null, 'Nothing in this aisle yet'), h('p', null, 'Try a different spelling, fewer filters, or browse the steals.'), h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Browse steals')),
       pager)));
 }
 
@@ -296,12 +294,12 @@ async function viewProduct(id) {
   const data = await api('GET', `/products/${encodeURIComponent(id)}`);
   const p = data.product;
   pushRecent(p.id);
-  document.title = `${p.title} : Bazaario.in`;
+  document.title = `${p.title} · Bazaario`;
   const maxQty = Math.min(p.stock, state.config.maxQtyPerItem || 10);
   const qtySel = h('select', { 'aria-label': 'Quantity' }, Array.from({ length: Math.max(1, maxQty) }, (_, i) => h('option', { value: i + 1 }, i + 1)));
 
   const pin = store.get('pin', '');
-  const pinIn = h('input', { value: pin, maxLength: 6, placeholder: 'Enter PIN code', inputMode: 'numeric', style: { width: '130px' } });
+  const pinIn = h('input', { value: pin, maxLength: 6, placeholder: 'Enter PIN code', inputMode: 'numeric', 'aria-label': 'Delivery PIN code' });
   const pinOut = h('div', { class: 'hint' });
   const checkPin = () => {
     if (!/^[1-9]\d{5}$/.test(pinIn.value)) { pinOut.className = 'err'; pinOut.textContent = 'Please enter a valid 6-digit PIN code.'; return; }
@@ -317,12 +315,12 @@ async function viewProduct(id) {
   const distRows = [5, 4, 3, 2, 1].map((star) => {
     const n = (data.ratingDistribution.find((r) => r.rating === star) || { n: 0 }).n;
     const share = total ? Math.round((n / total) * 100) : 0;
-    return h('div', { class: 'bar-row' }, h('span', null, `${star} star`), h('div', { class: 'bar' }, h('i', { style: { width: share + '%' } })), h('span', null, share + '%'));
+    return h('div', { class: 'bar-row' }, h('span', null, `${star} ★`), h('div', { class: 'bar' }, h('i', { style: { width: share + '%' } })), h('span', { class: 'muted' }, share + '%'));
   });
 
   const reviewForm = () => {
-    if (!state.user) return h('p', null, h('a', { href: '#/login?next=' + encodeURIComponent(location.hash) }, 'Sign in'), ' to write a review.');
-    if (!data.canReview) return h('p', { class: 'muted' }, 'Thank you — you have reviewed this product.');
+    if (!state.user) return h('p', null, h('a', { href: '#/login?next=' + encodeURIComponent(location.hash) }, 'Sign in'), ' to share your review.');
+    if (!data.canReview) return h('p', { class: 'muted' }, 'Thanks — you have already reviewed this product.');
     let rating = 0;
     const starBtns = [1, 2, 3, 4, 5].map((n) => h('button', { type: 'button', 'aria-label': `${n} star`, onclick: () => { rating = n; starBtns.forEach((b, i) => b.classList.toggle('on', i < n)); } }, '★'));
     const title = h('input', { maxLength: 100, required: true, placeholder: "What's most important to know?" });
@@ -337,70 +335,62 @@ async function viewProduct(id) {
           route();
         } catch (err) { fail(err); }
       },
-    }, h('h3', null, 'Review this product'), h('div', { class: 'star-input' }, starBtns),
-      h('label', null, 'Add a headline'), title, h('label', null, 'Add a written review'), body,
-      h('button', { class: 'btn btn-primary', style: { marginTop: '10px' } }, 'Submit'));
+    }, h('h3', null, 'Share your experience'), h('div', { class: 'star-input' }, starBtns),
+      h('label', null, 'Headline'), title, h('label', null, 'Your review'), body,
+      h('button', { class: 'btn btn-outline', style: { marginTop: '12px' } }, 'Post review'));
   };
 
-  const wishBtn = h('button', { class: 'btn btn-block', onclick: (e) => toggleWishlist(p, e.target) }, '♡ Add to Wish List');
+  const wishBtn = h('button', { class: 'btn btn-outline', type: 'button', onclick: (e) => toggleWishlist(p, e.currentTarget) }, '♡ Save to wishlist');
 
   mount(
-    h('p', { class: 'hint' }, h('a', { href: `#/s?category=${p.category}` }, p.category_name), ' › ', p.brand),
+    h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, 'Home'), ' / ',
+      h('a', { href: `#/s?category=${p.category}` }, p.category_name), ' / ', h('span', null, p.brand)),
     h('div', { class: 'pdp' },
-      h('div', null, h('div', { class: 'pdp-img', style: { background: p.color }, role: 'img', 'aria-label': p.title }, p.emoji)),
-      h('div', null,
-        h('h1', null, p.title),
-        h('a', { href: `#/s?q=${encodeURIComponent(p.brand)}` }, `Visit the ${p.brand} Store`),
-        h('div', null, `${p.rating_avg} `, h('span', { class: 'stars' }, stars(p.rating_avg)), ' ',
-          h('a', { href: '#reviews', onclick: (e) => { e.preventDefault(); $('#reviews').scrollIntoView(); } }, `${p.rating_count.toLocaleString('en-IN')} ratings`)),
-        h('div', { class: 'muted' }, `${p.sold_count.toLocaleString('en-IN')}+ bought in past month`),
-        h('hr'),
-        p.is_deal ? h('span', { class: 'badge badge-deal' }, 'Limited time deal') : null,
-        priceBlock(p, true),
-        h('div', null, 'Inclusive of all taxes'),
-        h('div', { class: 'muted' }, `EMI starts at ${inr(Math.ceil(p.price / 12))}/month. No Cost EMI available.`),
-        h('hr'),
-        h('h3', null, '🏷️ Offers'),
-        h('div', { class: 'offers' }, coupons.map(([c, d]) => h('div', { class: 'offer' }, h('b', null, 'Coupon ' + c), h('div', null, d)))),
+      h('div', { class: 'pdp-gallery' },
+        h('div', { class: 'pdp-img', style: { background: p.color }, role: 'img', 'aria-label': p.title }, p.emoji),
         h('div', { class: 'trust' },
-          h('div', null, h('span', null, '↩️'), `${state.config.returnWindowDays || 10} days Replacement`),
-          h('div', null, h('span', null, '🚚'), 'Free Delivery'),
-          h('div', null, h('span', null, '💵'), 'Pay on Delivery'),
-          h('div', null, h('span', null, '🔒'), 'Secure transaction'),
-          h('div', null, h('span', null, '🏆'), 'Top Brand')),
-        h('hr'),
-        h('h3', null, 'About this item'),
+          h('div', null, h('span', null, '↩️'), `${state.config.returnWindowDays || 10}-day returns`),
+          h('div', null, h('span', null, '🚚'), 'Free delivery'),
+          h('div', null, h('span', null, '💵'), 'Cash on Delivery'),
+          h('div', null, h('span', null, '🔒'), 'Secure payment'))),
+      h('div', { class: 'pdp-info' },
+        h('a', { class: 'brand', href: `#/s?q=${encodeURIComponent(p.brand)}` }, p.brand),
+        h('h1', { class: 'pdp-title' }, p.title),
+        h('div', { class: 'pdp-meta' }, ratingChip(p),
+          h('a', { href: '#reviews', onclick: (e) => { e.preventDefault(); $('#reviews').scrollIntoView(); } }, 'Read reviews'),
+          h('span', { class: 'muted' }, `${p.sold_count.toLocaleString('en-IN')}+ bought this month`)),
+        h('div', { class: 'buy-card' },
+          p.is_deal ? h('span', { class: 'tag-steal inline-tag' }, '✦ Bazaar steal') : null,
+          priceBlock(p, true),
+          h('p', { class: 'muted small' }, `Inclusive of GST · or ${inr(Math.ceil(p.price / 12))}/month with no-cost EMI`),
+          h('div', { class: 'stock-line' },
+            p.stock > 0 ? h('span', { class: p.stock < 10 ? 'low' : 'ok' }, p.stock < 10 ? `● Only ${p.stock} left` : '● In stock') : h('span', { class: 'err' }, '● Out of stock'),
+            h('span', { class: 'muted' }, p.express ? '⚡ Delivery tomorrow' : `Free delivery by ${deliveryDate(false)}`)),
+          h('div', { class: 'pin-check' }, h('span', null, '📍'), pinIn, h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: checkPin }, 'Check')),
+          pinOut,
+          p.stock > 0 ? h('div', { class: 'buy-actions' },
+            h('label', { class: 'qty' }, h('span', { class: 'sr-only' }, 'Quantity'), qtySel),
+            h('button', { class: 'btn btn-primary', onclick: () => addToCart(p, Number(qtySel.value)) }, 'Add to bag'),
+            h('button', { class: 'btn btn-outline', onclick: () => addToCart(p, Number(qtySel.value), true) }, 'Buy now')) : null,
+          h('div', { class: 'buy-foot' }, wishBtn, h('span', { class: 'muted small' }, '🔒 Sold & shipped by Bazaario Retail'))),
+        h('h3', null, 'Offers for you'),
+        h('div', { class: 'offers' }, coupons.map(([c, d]) => h('div', { class: 'offer' }, h('b', null, c), h('span', null, d)))),
+        h('h3', null, 'Highlights'),
         h('ul', { class: 'features' }, p.features.map((f) => h('li', null, f))),
-        h('p', null, p.description)),
-      h('div', { class: 'buybox' },
-        priceBlock(p),
-        h('p', null, p.express ? h('b', null, '⚡ Express: FREE delivery Tomorrow') : `FREE delivery ${deliveryDate(false)}`),
-        h('div', { style: { display: 'flex', gap: '6px' } }, pinIn, h('button', { class: 'btn btn-sm', onclick: checkPin }, 'Check')),
-        pinOut,
-        p.stock > 0 ? h('p', { class: 'ok', style: { fontSize: '18px' } }, p.stock < 10 ? `Only ${p.stock} left in stock.` : 'In stock')
-          : h('p', { class: 'err', style: { fontSize: '18px' } }, 'Currently unavailable.'),
-        h('p', { class: 'hint' }, 'Ships from & sold by Bazaario Retail'),
-        p.stock > 0 ? [
-          h('label', { class: 'inline' }, 'Quantity: ', qtySel),
-          h('button', { class: 'btn btn-primary btn-block', onclick: () => addToCart(p, Number(qtySel.value)) }, 'Add to Cart'),
-          h('button', { class: 'btn btn-buy btn-block', onclick: () => addToCart(p, Number(qtySel.value), true) }, 'Buy Now'),
-        ] : null,
-        h('p', { class: 'hint' }, '🔒 Secure transaction'),
-        h('hr'), wishBtn)),
+        h('p', { class: 'muted' }, p.description))),
     h('section', { class: 'reviews', id: 'reviews' },
-      h('div', null, h('h2', null, 'Customer reviews'),
-        h('div', null, h('span', { class: 'stars', style: { fontSize: '20px' } }, stars(p.rating_avg)), ` ${p.rating_avg} out of 5`),
-        h('p', { class: 'muted' }, `${p.rating_count.toLocaleString('en-IN')} global ratings`),
+      h('div', { class: 'review-summary' }, h('h2', null, 'What shoppers say'),
+        h('div', { class: 'big-rating' }, h('b', null, p.rating_avg.toFixed(1)), h('span', null, '★'), h('span', { class: 'muted' }, `${p.rating_count.toLocaleString('en-IN')} ratings`)),
         distRows, h('hr'), reviewForm()),
-      h('div', null, h('h3', null, 'Top reviews'),
+      h('div', null, h('h3', null, 'Recent reviews'),
         data.reviews.length ? data.reviews.map((r) => h('div', { class: 'review' },
-          h('div', { class: 'who' }, h('span', { class: 'avatar' }, r.author[0].toUpperCase()), r.author),
-          h('div', null, h('span', { class: 'stars' }, stars(r.rating)), ' ', h('b', null, r.title)),
-          h('div', { class: 'hint' }, `Reviewed in India on ${fmtDate(r.created_at)}`),
-          r.verified ? h('div', { style: { color: '#c45500', fontSize: '12px', fontWeight: 700 } }, 'Verified Purchase') : null,
-          h('p', null, r.body))) : h('p', { class: 'muted' }, 'No written reviews yet. Be the first to review this product.'))),
-    data.related.length ? h('div', { class: 'card row-card', style: { marginTop: '18px' } }, h('h2', null, 'Products related to this item'),
-      h('div', { class: 'scroller' }, data.related.map((r) => productCard(r, { compact: true })))) : null);
+          h('div', { class: 'who' }, h('span', { class: 'avatar' }, r.author[0].toUpperCase()),
+            h('div', null, h('b', null, r.author), h('div', { class: 'muted small' }, fmtDate(r.created_at)))),
+          h('div', { class: 'review-title' }, h('span', { class: 'rating' }, `${r.rating} ★`), h('b', null, r.title),
+            r.verified ? h('span', { class: 'verified' }, '✓ Verified buyer') : null),
+          h('p', null, r.body))) : h('div', { class: 'empty small-empty' }, h('p', null, 'No reviews yet — be the first to share your thoughts.')))),
+    data.related.length ? h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('div', null, h('h2', null, 'You may also like'), h('p', { class: 'tagline' }, `More from ${p.category_name}`))),
+      h('div', { class: 'grid' }, data.related.map((r) => productCard(r)))) : null);
 }
 
 // ---------- Cart ----------
@@ -430,44 +420,42 @@ async function viewCart() {
   });
 
   const line = (l, saved) => h('div', { class: 'line' },
-    h('a', { href: `#/p/${l.product_id}` }, h('div', { class: 'pimg', style: { background: l.color } }, l.emoji)),
+    h('a', { href: `#/p/${l.product_id}`, tabIndex: -1 }, h('div', { class: 'pimg', style: { background: l.color } }, l.emoji)),
     h('div', null,
-      h('a', { href: `#/p/${l.product_id}`, style: { color: 'var(--text)', fontSize: '17px' } }, l.title),
-      l.stock > 0 ? h('div', { class: 'ok' }, l.stock < 10 ? `Only ${l.stock} left in stock` : 'In stock') : h('div', { class: 'err' }, 'Out of stock'),
-      h('div', { class: 'hint' }, 'Eligible for FREE Shipping'),
+      h('a', { class: 'line-title', href: `#/p/${l.product_id}` }, l.title),
+      l.stock > 0 ? h('div', { class: l.stock < 10 ? 'low' : 'ok' }, l.stock < 10 ? `● Only ${l.stock} left` : '● In stock') : h('div', { class: 'err' }, '● Out of stock'),
+      h('div', { class: 'muted small' }, 'Free delivery on orders above ₹499'),
       h('div', { class: 'line-actions' },
         saved ? null : h('select', { 'aria-label': 'Quantity', onchange: (e) => setQty(l, Number(e.target.value)) },
           Array.from({ length: Math.max(1, Math.min(l.stock, state.config.maxQtyPerItem || 10)) }, (_, i) =>
-            h('option', { value: i + 1, selected: i + 1 === l.qty }, `Qty: ${i + 1}`))),
-        h('span', { class: 'sep' }, '|'),
-        h('button', { class: 'link-btn', onclick: () => remove(l) }, 'Delete'),
-        h('span', { class: 'sep' }, '|'),
-        h('button', { class: 'link-btn', onclick: () => saveLater(l, !saved) }, saved ? 'Move to cart' : 'Save for later'))),
-    h('div', { style: { textAlign: 'right' } }, h('b', { class: 'price-sm' }, inr(l.price)),
-      l.mrp > l.price ? h('div', { class: 'mrp hint' }, inr(l.mrp)) : null));
+            h('option', { value: i + 1, selected: i + 1 === l.qty }, `Qty ${i + 1}`))),
+        h('button', { class: 'link-btn', onclick: () => saveLater(l, !saved) }, saved ? 'Move to bag' : 'Save for later'),
+        h('button', { class: 'link-btn danger', onclick: () => remove(l) }, 'Remove'))),
+    h('div', { class: 'line-price' }, priceBlock(l)));
 
   const remaining = data.freeShippingThreshold - data.subtotal;
   const summary = h('div', { class: 'card' },
     data.lines.length ? (remaining > 0
-      ? h('div', null, h('div', { class: 'progress' }, h('i', { style: { width: `${Math.min(100, (data.subtotal / data.freeShippingThreshold) * 100)}%` } })),
-        h('p', { class: 'hint' }, `Add ${inr(remaining)} of eligible items to get FREE delivery.`))
-      : h('p', { class: 'ok' }, '✔ Your order is eligible for FREE Delivery.')) : null,
-    h('p', { style: { fontSize: '18px' } }, `Subtotal (${data.count} item${data.count === 1 ? '' : 's'}): `, h('b', null, inr(data.subtotal))),
+      ? h('div', { class: 'ship-meter' }, h('p', { class: 'small' }, `You're ${inr(remaining)} away from free delivery`),
+        h('div', { class: 'progress' }, h('i', { style: { width: `${Math.min(100, (data.subtotal / data.freeShippingThreshold) * 100)}%` } })))
+      : h('div', { class: 'ship-meter done' }, h('p', { class: 'small' }, '🎉 You\'ve unlocked free delivery'))) : null,
+    h('h3', null, 'Bag summary'),
+    h('div', { class: 'sum-row' }, h('span', null, `Items (${data.count})`), h('b', null, inr(data.subtotal))),
     h('button', {
       class: 'btn btn-primary btn-block', disabled: !data.lines.length,
       onclick: () => { location.hash = state.user ? '#/checkout' : '#/login?next=%23%2Fcheckout'; },
-    }, 'Proceed to Buy'));
+    }, 'Checkout'),
+    h('p', { class: 'muted small center' }, '🔒 Secure checkout · UPI, cards & Cash on Delivery'));
 
-  mount(h('div', { class: 'two-col' },
+  mount(h('h1', { class: 'page-title' }, 'Your bag'), h('div', { class: 'two-col' },
     h('div', null,
       h('div', { class: 'card' },
-        h('h1', null, data.lines.length ? 'Shopping Cart' : 'Your Bazaario Cart is empty'),
-        data.lines.length ? h('div', { class: 'hint', style: { textAlign: 'right' } }, 'Price') : h('p', null, h('a', { href: '#/s?deals=1' }, "Shop today's deals")),
+        data.lines.length ? null : h('div', { class: 'empty' }, h('div', { class: 'empty-ic' }, '👜'), h('h2', null, 'Your bag is empty'),
+          h('p', null, 'Fill it with something lovely from today\'s steals.'), h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Browse steals')),
         data.lines.map((l) => line(l, false)),
-        data.lines.length ? h('p', { style: { textAlign: 'right', fontSize: '18px' } }, `Subtotal (${data.count} items): `, h('b', null, inr(data.subtotal))) : null,
-        state.user ? null : h('p', null, h('a', { class: 'btn btn-primary', href: '#/login?next=%23%2Fcart' }, 'Sign in to your account'), ' ',
-          h('a', { class: 'btn', href: '#/register' }, 'Sign up now'))),
-      data.saved.length ? h('div', { class: 'card', style: { marginTop: '18px' } }, h('h2', null, `Saved for later (${data.saved.length} item${data.saved.length === 1 ? '' : 's'})`),
+        state.user ? null : h('div', { class: 'guest-note' }, h('span', null, 'Sign in to keep your bag on every device.'),
+          h('a', { class: 'btn btn-outline btn-sm', href: '#/login?next=%23%2Fcart' }, 'Sign in'))),
+      data.saved.length ? h('div', { class: 'card', style: { marginTop: '24px' } }, h('h2', null, `Saved for later (${data.saved.length})`),
         data.saved.map((l) => line(l, true))) : null),
     summary));
 }
@@ -524,14 +512,14 @@ async function viewCheckout() {
       const q = await api('POST', '/checkout/quote', { coupon: sel.coupon || undefined, paymentMethod: sel.method });
       summaryBox.replaceChildren(
         placeBtn,
-        h('p', { class: 'hint', style: { textAlign: 'center' } }, 'By placing your order, you agree to Bazaario\'s privacy notice and conditions of use.'),
-        h('hr'), h('h3', null, 'Order Summary'),
+        h('p', { class: 'muted small center' }, 'By placing your order you agree to Bazaario\'s privacy notice and terms.'),
+        h('hr'), h('h3', null, 'Order summary'),
         h('dl', null,
           h('dt', null, 'Items:'), h('dd', null, inr(q.subtotal)),
           h('dt', null, 'Delivery:'), h('dd', null, q.shipping ? inr(q.shipping) : 'FREE'),
           q.discount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.discount))] : null,
-          h('dt', { class: 'total' }, 'Order Total:'), h('dd', { class: 'total' }, inr(q.total))),
-        q.savings > 0 ? h('p', { class: 'ok' }, `Your Savings: ${inr(q.savings)}`) : null);
+          h('dt', { class: 'total' }, 'To pay'), h('dd', { class: 'total' }, inr(q.total))),
+        q.savings > 0 ? h('p', { class: 'savings' }, `✦ You save ${inr(q.savings)} on this order`) : null);
       return true;
     } catch (e) {
       if (sel.coupon) { sel.coupon = ''; couponIn.value = ''; fail(e); return refreshQuote(); }
@@ -589,14 +577,16 @@ async function viewCheckout() {
     }
   } }, 'Place your order');
 
-  mount(h('h1', null, 'Checkout'), errBox,
+  const stepper = h('ol', { class: 'stepper', 'aria-label': 'Checkout progress' },
+    ['Bag', 'Delivery & payment', 'Order placed'].map((t, i) => h('li', { class: i === 0 ? 'done' : i === 1 ? 'current' : '' }, h('span', null, i === 0 ? '✓' : i + 1), t)));
+  mount(stepper, h('h1', { class: 'page-title' }, 'Checkout'), errBox,
     h('div', { class: 'two-col' },
       h('div', null,
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '1'), 'Select a delivery address'),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '1'), 'Where should we deliver?'),
           addrList,
           addresses.length ? h('button', { class: 'link-btn', onclick: () => newAddr.classList.toggle('hidden') }, '+ Add a new address') : null,
           newAddr),
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '2'), 'Payment method'),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '2'), 'How would you like to pay?'),
           payOpt('upi', 'UPI (Google Pay, PhonePe, Paytm & more)'), payOpt('card', 'Credit or debit card'), payOpt('cod', 'Cash on Delivery / Pay on Delivery'),
           h('hr'), h('label', null, 'Apply a coupon'),
           h('div', { style: { display: 'flex', gap: '8px' } }, couponIn, h('button', { class: 'btn', onclick: async () => {
@@ -604,9 +594,9 @@ async function viewCheckout() {
             if (await refreshQuote() && sel.coupon) toast(`Coupon ${sel.coupon.toUpperCase()} applied!`);
           } }, 'Apply')),
           h('p', { class: 'hint' }, 'Try WELCOME10, SAVE100 or FESTIVE15')),
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '3'), 'Review items and delivery'),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '3'), 'Your items'),
           cart.lines.map((l) => h('div', { class: 'order-item' }, h('div', { class: 'pimg', style: { background: l.color } }, l.emoji),
-            h('div', null, h('b', null, l.title), h('div', { class: 'price-sm', style: { color: 'var(--price)' } }, inr(l.price)), h('div', null, `Qty: ${l.qty}`),
+            h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
               h('div', { class: 'ok' }, `Delivery: ${deliveryDate(l.express)}`)))))),
       summaryBox));
   await refreshQuote();
@@ -619,20 +609,20 @@ function orderCard(o) {
       h('div', null, 'ORDER PLACED', h('b', null, fmtDate(o.created_at))),
       h('div', null, 'TOTAL', h('b', null, inr(o.total))),
       h('div', null, 'PAYMENT', h('b', null, `${o.payment_method.toUpperCase()} · ${o.payment_status}`)),
-      h('div', { class: 'right' }, `ORDER # ${o.order_no}`, h('b', null, h('a', { href: `#/orders/${o.id}` }, 'View order details')))),
+      h('div', { class: 'right' }, `ORDER ${o.order_no}`, h('b', null, h('a', { href: `#/orders/${o.id}` }, 'View details →')))),
     h('div', { class: 'order-body' },
       h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
       o.items.map((it) => h('div', { class: 'order-item' },
         h('a', { href: `#/p/${it.product_id}` }, h('div', { class: 'pimg', style: { background: '#f3f3f3' } }, it.emoji)),
         h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'hint' }, `Qty ${it.qty} · ${inr(it.price)}`),
-          h('button', { class: 'btn btn-sm btn-primary', onclick: async () => addToCart({ id: it.product_id, title: it.title, stock: 10 }) }, '↻ Buy it again'))))));
+          h('button', { class: 'btn btn-sm btn-outline', onclick: async () => addToCart({ id: it.product_id, title: it.title, stock: 10 }) }, '↻ Buy again'))))));
 }
 
 async function viewOrders() {
   if (!state.user) { location.hash = '#/login?next=%23%2Forders'; return; }
   const { orders } = await api('GET', '/orders');
-  mount(h('h1', null, 'Your Orders'),
-    orders.length ? orders.map(orderCard) : h('div', { class: 'card' }, h('p', null, 'You have not placed any orders yet. '), h('a', { href: '#/' }, 'Continue shopping')));
+  mount(h('h1', { class: 'page-title' }, 'Your orders'),
+    orders.length ? orders.map(orderCard) : h('div', { class: 'card empty' }, h('div', { class: 'empty-ic' }, '📦'), h('h2', null, 'No orders yet'), h('p', null, 'When you place an order, you can track it here.'), h('a', { class: 'btn btn-primary', href: '#/' }, 'Start shopping')));
 }
 
 async function viewOrder(id, params) {
@@ -645,43 +635,43 @@ async function viewOrder(id, params) {
     try { await api('POST', `/orders/${o.id}/${path}`); toast('Request submitted.'); route(); } catch (e) { fail(e); }
   };
   mount(
-    new URLSearchParams(params).get('placed') ? h('div', { class: 'alert alert-ok' }, h('b', null, '✔ Order placed, thank you!'),
+    new URLSearchParams(params).get('placed') ? h('div', { class: 'alert alert-ok' }, h('b', null, '🎉 Thank you! Your order is confirmed.'),
       ` Confirmation will be sent to ${state.user.email}. Order # ${o.order_no}`) : null,
-    h('p', null, h('a', { href: '#/orders' }, '‹ Your Orders')),
-    h('h1', null, 'Order Details'),
+    h('p', null, h('a', { href: '#/orders' }, '← All orders')),
+    h('h1', { class: 'page-title' }, 'Order details'),
     h('p', { class: 'muted' }, `Ordered on ${fmtDate(o.created_at)} | Order# ${o.order_no}`),
     h('div', { class: 'card' },
       h('div', { class: 'form-grid' },
-        h('div', null, h('h3', null, 'Shipping Address'), h('div', null, o.address.fullName), h('div', null, o.address.line1),
+        h('div', null, h('h3', null, 'Delivering to'), h('div', null, o.address.fullName), h('div', null, o.address.line1),
           o.address.line2 ? h('div', null, o.address.line2) : null, h('div', null, `${o.address.city}, ${o.address.state} ${o.address.pincode}`), h('div', null, `Phone: ${o.address.phone}`)),
-        h('div', { class: 'summary' }, h('h3', null, 'Order Summary'),
+        h('div', { class: 'summary' }, h('h3', null, 'Payment summary'),
           h('dl', null,
             h('dt', null, 'Item(s) Subtotal:'), h('dd', null, inr(o.subtotal)),
             h('dt', null, 'Shipping:'), h('dd', null, inr(o.shipping)),
             o.discount ? [h('dt', null, `Promotion (${o.coupon_code}):`), h('dd', null, '-' + inr(o.discount))] : null,
-            h('dt', { class: 'total' }, 'Grand Total:'), h('dd', { class: 'total' }, inr(o.total))),
+            h('dt', { class: 'total' }, 'Total paid'), h('dd', { class: 'total' }, inr(o.total))),
           h('p', { class: 'hint' }, `Payment: ${o.payment_method.toUpperCase()} (${o.payment_status})${o.payment_ref ? ' · Ref ' + o.payment_ref : ''}`)))),
     h('div', { class: 'card', style: { marginTop: '16px' } },
       h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
       reached >= 0 ? h('div', { class: 'tracker' }, steps.map((s, i) => h('div', { class: i <= reached ? 'done' : '' }, STATUS_LABEL[s]))) : null,
       o.items.map((it) => h('div', { class: 'order-item' }, h('div', { class: 'pimg', style: { background: '#f3f3f3' } }, it.emoji),
-        h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', null, `Qty: ${it.qty} · `, h('b', { style: { color: 'var(--price)' } }, inr(it.price))),
-          o.status === 'delivered' ? h('a', { class: 'btn btn-sm', href: `#/p/${it.product_id}#reviews` }, 'Write a product review') : null))),
+        h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'muted small' }, `Qty ${it.qty} · `, h('b', { class: 'now-sm' }, inr(it.price))),
+          o.status === 'delivered' ? h('a', { class: 'btn btn-sm btn-outline', href: `#/p/${it.product_id}#reviews` }, 'Review this item') : null))),
       h('div', { style: { display: 'flex', gap: '10px', marginTop: '10px' } },
-        ['placed', 'packed'].includes(o.status) ? h('button', { class: 'btn', onclick: () => act('cancel', 'Cancel this order?') }, 'Cancel order') : null,
-        o.status === 'delivered' ? h('button', { class: 'btn', onclick: () => act('return', 'Request a return for this order?') }, 'Return or replace items') : null)));
+        ['placed', 'packed'].includes(o.status) ? h('button', { class: 'btn btn-outline', onclick: () => act('cancel', 'Cancel this order?') }, 'Cancel order') : null,
+        o.status === 'delivered' ? h('button', { class: 'btn btn-outline', onclick: () => act('return', 'Request a return for this order?') }, 'Return items') : null)));
 }
 
 // ---------- Wishlist ----------
 async function viewWishlist() {
   if (!state.user) { location.hash = '#/login?next=%23%2Fwishlist'; return; }
   const { items } = await api('GET', '/wishlist');
-  mount(h('h1', null, 'Your Wish List'),
+  mount(h('h1', { class: 'page-title' }, 'Your wishlist'),
     items.length ? h('div', { class: 'grid' }, items.map((p) => {
       const c = productCard(p);
-      c.append(h('button', { class: 'link-btn', onclick: async () => { await api('DELETE', `/wishlist/${p.id}`).catch(fail); route(); } }, 'Remove from list'));
+      c.querySelector('.pbody').append(h('button', { class: 'link-btn danger', onclick: async () => { await api('DELETE', `/wishlist/${p.id}`).catch(fail); route(); } }, 'Remove from wishlist'));
       return c;
-    })) : h('div', { class: 'card' }, h('p', null, 'Your Wish List is empty. Tap ♡ on any product to save it here.')));
+    })) : h('div', { class: 'card empty' }, h('div', { class: 'empty-ic' }, '♡'), h('h2', null, 'Nothing saved yet'), h('p', null, 'Tap the heart on any product to keep it here.'), h('a', { class: 'btn btn-primary', href: '#/' }, 'Explore the bazaar')));
 }
 
 // ---------- Auth ----------
@@ -694,16 +684,17 @@ function viewLogin(params) {
   const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
   const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Sign in');
   mount(h('div', { class: 'auth' },
-    h('a', { class: 'logo-dark', href: '#/' }, 'bazaario.in'),
+    h('div', { class: 'auth-side' }, h('span', { class: 'logo-mark big' }, '✺'), h('h2', null, 'Welcome back to the bazaar'),
+      h('p', null, 'Track orders, keep your wishlist and check out faster.')),
     h('div', { class: 'card' }, h('h1', null, 'Sign in'), err,
       h('form', { onsubmit: async (e) => {
         e.preventDefault(); err.classList.add('hidden'); btn.disabled = true;
         try { await afterLogin(await api('POST', '/auth/login', { email: email.value, password: pw.value }), safeNext); }
         catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); btn.disabled = false; pw.value = ''; }
       } }, h('label', null, 'Email'), email, h('label', null, 'Password'), pw, btn),
-      h('p', { class: 'hint' }, 'By continuing, you agree to Bazaario\'s Conditions of Use and Privacy Notice.')),
-    h('div', { class: 'divider' }, h('span', null, 'New to Bazaario?')),
-    h('a', { class: 'btn btn-block', href: '#/register' + (next ? '?next=' + encodeURIComponent(next) : '') }, 'Create your Bazaario account')));
+      h('p', { class: 'muted small' }, 'By continuing you agree to Bazaario\'s terms and privacy notice.'),
+      h('div', { class: 'divider' }, h('span', null, 'New to Bazaario?')),
+      h('a', { class: 'btn btn-outline btn-block', href: '#/register' + (next ? '?next=' + encodeURIComponent(next) : '') }, 'Create an account'))));
 }
 
 function viewRegister(params) {
@@ -716,8 +707,9 @@ function viewRegister(params) {
   const pw2 = h('input', { type: 'password', required: true, autocomplete: 'new-password' });
   const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
   mount(h('div', { class: 'auth' },
-    h('a', { class: 'logo-dark', href: '#/' }, 'bazaario.in'),
-    h('div', { class: 'card' }, h('h1', null, 'Create Account'), err,
+    h('div', { class: 'auth-side' }, h('span', { class: 'logo-mark big' }, '✺'), h('h2', null, 'Join the bazaar'),
+      h('p', null, 'Get 10% off your first order with WELCOME10, plus wishlists and order tracking.')),
+    h('div', { class: 'card' }, h('h1', null, 'Create account'), err,
       h('form', { onsubmit: async (e) => {
         e.preventDefault(); err.classList.add('hidden');
         if (pw.value !== pw2.value) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
@@ -728,25 +720,26 @@ function viewRegister(params) {
         } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
       } },
       h('label', null, 'Your name'), name, h('label', null, 'Mobile number'), phone, h('label', null, 'Email'), email,
-      h('label', null, 'Password'), pw, h('div', { class: 'hint' }, 'ⓘ Passwords must be at least 8 characters with letters and numbers.'),
+      h('label', null, 'Password'), pw, h('div', { class: 'muted small' }, 'At least 8 characters, with letters and numbers.'),
       h('label', null, 'Re-enter password'), pw2,
-      h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '14px' } }, 'Continue')),
-      h('p', { class: 'hint' }, 'Already have an account? ', h('a', { href: '#/login' }, 'Sign in ›')))));
+      h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' } }, 'Create account')),
+      h('p', { class: 'muted small' }, 'Already have an account? ', h('a', { href: '#/login' }, 'Sign in')))));
 }
 
 // ---------- Account ----------
 async function viewAccount() {
   if (!state.user) { location.hash = '#/login?next=%23%2Faccount'; return; }
-  const tile = (href, icon, title, desc) => h('a', { class: 'acc-tile', href }, h('span', { class: 'ic' }, icon), h('div', null, h('h3', null, title), h('div', { class: 'hint' }, desc)));
-  mount(h('h1', null, 'Your Account'),
+  const tile = (href, icon, title, desc) => h('a', { class: 'acc-tile', href }, h('span', { class: 'ic' }, icon), h('div', null, h('h3', null, title), h('div', { class: 'muted small' }, desc)));
+  mount(h('h1', { class: 'page-title' }, `Namaste, ${state.user.name.split(' ')[0]}`),
+    h('p', { class: 'tagline' }, 'Everything about your account, in one place'),
     h('div', { class: 'acc-grid' },
-      tile('#/orders', '📦', 'Your Orders', 'Track, return, or buy things again'),
-      tile('#/security', '🔐', 'Login & security', 'Edit name, mobile number and password'),
-      tile('#/addresses', '📍', 'Your Addresses', 'Edit addresses for orders'),
-      tile('#/wishlist', '♡', 'Your Lists', 'View and manage your Wish List'),
-      tile('#/s?deals=1', '🏷️', "Today's Deals", 'Limited time offers'),
-      state.user.role === 'admin' ? tile('#/admin', '🛠️', 'Seller / Admin Central', 'Products, orders, customers, coupons') : null),
-    h('p', null, h('button', { class: 'btn', onclick: logout }, 'Sign Out')));
+      tile('#/orders', '📦', 'Orders', 'Track, return or buy again'),
+      tile('#/security', '🔐', 'Profile & security', 'Name, mobile number and password'),
+      tile('#/addresses', '📍', 'Addresses', 'Manage delivery addresses'),
+      tile('#/wishlist', '♡', 'Wishlist', 'Things you have saved'),
+      tile('#/s?deals=1', '✦', 'Bazaar steals', 'Limited-time offers'),
+      state.user.role === 'admin' ? tile('#/admin', '🛠️', 'Bazaario Studio', 'Products, orders, customers, coupons') : null),
+    h('p', null, h('button', { class: 'btn btn-outline', onclick: logout }, 'Sign out')));
 }
 
 async function viewSecurity() {
@@ -755,7 +748,7 @@ async function viewSecurity() {
   const phone = h('input', { value: state.user.phone || '', maxLength: 10, pattern: '[6-9][0-9]{9}', inputMode: 'numeric' });
   const cur = h('input', { type: 'password', required: true, autocomplete: 'current-password' });
   const np = h('input', { type: 'password', required: true, minLength: 8, autocomplete: 'new-password' });
-  mount(h('h1', null, 'Login & Security'),
+  mount(h('h1', { class: 'page-title' }, 'Profile & security'),
     h('div', { class: 'two-col' },
       h('div', { class: 'card' },
         h('form', { onsubmit: async (e) => {
@@ -781,9 +774,9 @@ async function viewAddresses() {
   const { addresses } = await api('GET', '/addresses');
   const formBox = h('div', { class: 'card hidden', style: { marginBottom: '16px' } });
   const openForm = (a) => { formBox.replaceChildren(h('h3', null, a ? 'Edit address' : 'Add a new address'), addressForm(() => route(), a)); formBox.classList.remove('hidden'); formBox.scrollIntoView(); };
-  mount(h('h1', null, 'Your Addresses'), formBox,
+  mount(h('h1', { class: 'page-title' }, 'Your addresses'), formBox,
     h('div', { class: 'acc-grid' },
-      h('button', { class: 'acc-tile', style: { justifyContent: 'center', alignItems: 'center', minHeight: '180px', cursor: 'pointer', fontSize: '18px' }, onclick: () => openForm() }, '＋ Add address'),
+      h('button', { class: 'acc-tile add-tile', onclick: () => openForm() }, '＋ Add a new address'),
       addresses.map((a) => h('div', { class: 'acc-tile', style: { flexDirection: 'column', gap: '2px' } },
         a.is_default ? h('div', { class: 'hint' }, 'Default') : null,
         h('b', null, a.full_name), h('div', null, a.line1), a.line2 ? h('div', null, a.line2) : null,
@@ -801,7 +794,7 @@ async function viewAdmin(params) {
   const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['products', 'Products'], ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
     .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
-  mount(h('h1', null, '🛠️ Seller Central'), tabs, body);
+  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Run your store: orders, catalog, customers and offers'), tabs, body);
 
   if (tab === 'dashboard') {
     const s = await api('GET', '/admin/stats');
@@ -834,7 +827,7 @@ async function viewAdmin(params) {
       const catSel = h('select', null, state.categories.map((c) => h('option', { value: c.id, selected: p && p.category_id === c.id }, c.name)));
       const chk = (label, on) => { const c = h('input', { type: 'checkbox', checked: on }); return [c, h('label', { class: 'inline' }, c, label)]; };
       const [exp, expL] = chk('Express delivery', p ? !!p.express : false);
-      const [deal, dealL] = chk("Today's Deal", p ? !!p.is_deal : false);
+      const [deal, dealL] = chk('Bazaar steal', p ? !!p.is_deal : false);
       const [act, actL] = chk('Active (visible in store)', p ? !!p.active : true);
       formBox.replaceChildren(h('h3', null, p ? `Edit product #${p.id}` : 'Add a product'),
         h('form', { onsubmit: async (e) => {
@@ -855,17 +848,17 @@ async function viewAdmin(params) {
           inp('description', 'Description', { tag: 'textarea', rows: 3, value: p ? p.description : '', maxLength: 4000, full: true }),
           inp('features', 'Key features (one per line)', { tag: 'textarea', rows: 4, value: p ? p.features.join('\n') : '', full: true })),
         expL, dealL, actL, h('button', { class: 'btn btn-primary' }, 'Save product'), ' ',
-        h('button', { type: 'button', class: 'btn', onclick: () => formBox.classList.add('hidden') }, 'Cancel')));
+        h('button', { type: 'button', class: 'btn btn-outline', onclick: () => formBox.classList.add('hidden') }, 'Cancel')));
       formBox.classList.remove('hidden');
       formBox.scrollIntoView();
     };
-    body.append(h('p', null, h('button', { class: 'btn btn-dark', onclick: () => openForm() }, '＋ Add a product')), formBox,
+    body.append(h('p', null, h('button', { class: 'btn btn-primary', onclick: () => openForm() }, '＋ Add a product')), formBox,
       h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['', 'Product', 'Category', 'Price', 'MRP', 'Stock', 'Status', ''].map((t) => h('th', null, t))),
         products.map((p) => h('tr', null, h('td', null, p.emoji), h('td', null, h('a', { href: `#/p/${p.id}` }, p.title), h('div', { class: 'hint' }, p.brand)),
           h('td', null, p.category_name), h('td', null, inr(p.price)), h('td', null, inr(p.mrp)),
           h('td', { class: p.stock < 20 ? 'err' : '' }, p.stock), h('td', null, p.active ? 'Active' : 'Inactive'),
-          h('td', null, h('button', { class: 'btn btn-sm', onclick: () => openForm(p) }, 'Edit')))))));
+          h('td', null, h('button', { class: 'btn btn-sm btn-outline', onclick: () => openForm(p) }, 'Edit')))))));
   }
 
   if (tab === 'customers') {
@@ -896,7 +889,7 @@ async function viewAdmin(params) {
     h('table', null, h('tr', null, ['Code', 'Type', 'Value', 'Max', 'Min order', 'Status', ''].map((t) => h('th', null, t))),
       coupons.map((c) => h('tr', null, h('td', null, h('b', null, c.code)), h('td', null, c.kind), h('td', null, c.kind === 'percent' ? `${c.value}%` : inr(c.value)),
         h('td', null, c.max_discount ? inr(c.max_discount) : '—'), h('td', null, inr(c.min_order)), h('td', null, c.active ? 'Active' : 'Disabled'),
-        h('td', null, c.active ? h('button', { class: 'btn btn-sm', onclick: async () => { await api('DELETE', `/admin/coupons/${encodeURIComponent(c.code)}`).catch(fail); route(); } }, 'Disable') : null)))));
+        h('td', null, c.active ? h('button', { class: 'btn btn-sm btn-outline', onclick: async () => { await api('DELETE', `/admin/coupons/${encodeURIComponent(c.code)}`).catch(fail); route(); } }, 'Disable') : null)))));
   }
 
   if (tab === 'audit') {
@@ -910,7 +903,7 @@ async function viewAdmin(params) {
 
 // ---------- Static info pages ----------
 const PAGES = {
-  about: ['About Bazaario', 'Bazaario is an online marketplace offering millions of products across categories with fast delivery, easy returns and secure payments.'],
+  about: ['Our story', 'Bazaario brings the warmth of an Indian bazaar online: handpicked brands, honest prices, and delivery to your doorstep.'],
   careers: ['Careers', 'We are hiring engineers, designers and operations specialists across India.'],
   press: ['Press Releases', 'For media enquiries please contact press@bazaario.example.'],
   sell: ['Sell on Bazaario', 'Reach crores of customers. Register as a seller, list products, and let us handle delivery and payments.'],
@@ -924,14 +917,14 @@ const PAGES = {
 };
 function viewPage(slug) {
   const p = PAGES[slug];
-  mount(h('div', { class: 'card' }, h('h1', null, p ? p[0] : 'Page not found'), h('p', null, p ? p[1] : 'The page you requested does not exist.')));
+  mount(h('div', { class: 'card prose' }, h('h1', null, p ? p[0] : 'Page not found'), h('p', null, p ? p[1] : 'The page you requested does not exist.')));
 }
 
 // ---------------- Router ----------------
 async function route() {
   state.timers.forEach(clearInterval);
   state.timers = [];
-  document.title = 'Bazaario - Online Shopping for Everything';
+  document.title = 'Bazaario - Your Online Bazaar';
   const [raw = '/', anchor] = location.hash.slice(1).split('#');
   const [path, query = ''] = (raw || '/').split('?');
   const parts = path.split('/').filter(Boolean);
@@ -959,8 +952,8 @@ async function route() {
     if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
   } catch (e) {
     if (e.status === 401) { location.hash = '#/login?next=' + encodeURIComponent('#' + raw); return; }
-    mount(h('div', { class: 'card' }, h('h1', null, e.status === 404 ? 'Sorry! We couldn\'t find that page' : 'Something went wrong'),
-      h('p', null, e.message), h('a', { href: '#/' }, 'Go to the Bazaario home page')));
+    mount(h('div', { class: 'card empty' }, h('div', { class: 'empty-ic' }, '🧭'), h('h1', null, e.status === 404 ? 'This aisle doesn\'t exist' : 'Something went wrong'),
+      h('p', null, e.message), h('a', { class: 'btn btn-primary', href: '#/' }, 'Back to the bazaar')));
   }
 }
 
@@ -998,14 +991,14 @@ function setupDeliver() {
     const modal = $('#modal');
     const pin = h('input', { maxLength: 6, inputMode: 'numeric', value: store.get('pin', ''), placeholder: 'Enter a 6-digit PIN code' });
     const err = h('div', { class: 'err hint' });
-    $('#modal-body').replaceChildren(h('h3', null, 'Choose your location'),
-      h('p', { class: 'hint' }, 'Delivery options and delivery speeds may vary for different locations.'),
+    $('#modal-body').replaceChildren(h('h3', null, 'Where should we deliver?'),
+      h('p', { class: 'muted small' }, 'Delivery dates and Cash on Delivery depend on your PIN code.'),
       h('form', { onsubmit: (e) => {
         e.preventDefault();
         if (!/^[1-9]\d{5}$/.test(pin.value)) { err.textContent = 'Please enter a valid PIN code.'; return; }
         store.set('pin', pin.value); renderHeader(); modal.close(); toast(`Delivering to ${pin.value}`);
       } }, pin, err, h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px' } },
-        h('button', { class: 'btn btn-primary' }, 'Apply'), h('button', { type: 'button', class: 'btn', onclick: () => modal.close() }, 'Cancel'))));
+        h('button', { class: 'btn btn-primary' }, 'Save PIN'), h('button', { type: 'button', class: 'btn btn-outline', onclick: () => modal.close() }, 'Cancel'))));
     modal.showModal();
   });
 }
@@ -1017,9 +1010,12 @@ async function init() {
     state.categories = cats.categories;
   } catch { /* render anyway */ }
   const sub = $('#subnav');
-  state.categories.forEach((c) => sub.append(h('a', { href: `#/s?category=${c.slug}` }, c.name)));
-  sub.append(h('a', { href: '#/page/sell' }, 'Sell'), h('a', { href: '#/page/help' }, 'Customer Service'));
-  $('#back-top').addEventListener('click', (e) => { e.preventDefault(); window.scrollTo(0, 0); });
+  state.categories.forEach((c) => sub.append(h('a', { class: 'chip', href: `#/s?category=${c.slug}` }, `${c.icon} ${c.name}`)));
+  $('#newsletter').addEventListener('submit', (e) => {
+    e.preventDefault();
+    e.target.reset();
+    toast('Thanks! Weekly steals are on their way to your inbox.');
+  });
   setupSearch();
   setupDeliver();
   renderHeader();
