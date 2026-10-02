@@ -8,8 +8,20 @@
   },
   "postCreateCommand": "npm install",
   "postAttachCommand": "npm start",
-  "forwardPorts": [3000],
+  "forwardPorts": [
+    3000
+  ],
   "portsAttributes": {
-    "3000": { "label": "Bazaario store", "onAutoForward": "openBrowser" }
+    "3000": {
+      "label": "Bazaario store",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code"
+      ]
+    }
   }
 }
