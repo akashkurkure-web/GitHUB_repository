@@ -206,3 +206,13 @@ tests/api.test.js      Integration & security tests (npm test)
 | Free-delivery threshold, shipping fee, COD limit, return window | `src/config.js` |
 | Products, categories, coupons | Bazaario Studio UI (or `src/seed.js` for the initial catalog) |
 | Real product photos | Add an `image_url` column, put images in `public/img/`, render an `<img>` in `productCard()`. Keep images same-origin or add your CDN to `img-src` in the CSP |
+
+## Using Claude Code with VS Code
+
+One-time setup on your machine (installs the Claude Code CLI and the VS Code extension):
+
+- **Windows (PowerShell):** `powershell -ExecutionPolicy Bypass -File scripts\setup-claude-vscode.ps1`
+- **macOS / Linux / WSL:** `bash scripts/setup-claude-vscode.sh`
+
+Then restart VS Code, open this folder, click the Claude icon in the sidebar and sign in.
+VS Code will also suggest the extension automatically via `.vscode/extensions.json`.
