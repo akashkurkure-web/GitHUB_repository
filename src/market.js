@@ -57,6 +57,7 @@ function mayList(seller, categorySlug) {
 
 function isAssured(offer, seller) {
   if (seller.lane === 'direct') return true;
+  if (seller.lane === 'shop') return false;
   return seller.score !== null && seller.score !== undefined && seller.score >= 85 && offer.dispatch_days <= 1 && seller.fulfilment !== 'self';
 }
 
@@ -64,6 +65,9 @@ function isAssured(offer, seller) {
 function deliverable(offer, state) {
   return offer.lane !== 'value' || !state || offer.pickup_state === state;
 }
+
+/** Partner shops sell only to their neighbourhood, so they are not part of the national best offer. */
+const national = (o) => o.lane !== 'shop';
 
 /** Extra days on top of the courier's time for this offer: the seller's dispatch time, and economy shipping for Value. */
 function extraDays(offer) {
@@ -83,7 +87,8 @@ function rankOffers(offers) {
 }
 
 const OFFER_SQL = `SELECT o.*, s.code AS seller_code, s.lane, s.display_name AS seller_name, s.status, s.score, s.fulfilment,
-  s.pickup_state, s.pickup_city FROM offers o JOIN sellers s ON s.id = o.seller_id`;
+  s.pickup_state, s.pickup_city, s.lat, s.lng, s.radius_km, s.open_hour, s.close_hour, s.accepting
+  FROM offers o JOIN sellers s ON s.id = o.seller_id`;
 
 function offersFor(d, productId) {
   return d.prepare(`${OFFER_SQL} WHERE o.product_id = ?`).all(productId);
@@ -95,7 +100,7 @@ function offerById(d, offerId) {
 
 /** Recomputes the best offer of a product and caches it on the product row. */
 function syncProduct(d, productId) {
-  const ranked = rankOffers(offersFor(d, productId));
+  const ranked = rankOffers(offersFor(d, productId).filter(national));
   const best = ranked[0];
   if (best) {
     d.prepare('UPDATE products SET best_offer_id = ?, seller_id = ?, price = ?, stock = ?, assured = ?, offer_count = ? WHERE id = ?')
@@ -159,6 +164,7 @@ function refreshScore(d, sellerId) {
 
 function commissionPct(lane, categorySlug) {
   if (lane === 'value' || lane === 'direct') return 0;
+  if (lane === 'shop') return config.express.shopCommission;
   return M.commission[categorySlug] ?? M.defaultCommission;
 }
 
@@ -193,6 +199,6 @@ function publicSeller(s) {
 
 module.exports = {
   DIRECT, CATEGORY_DEFAULTS, CATEGORY_SPECS, GST_RATES, SELLER_FAULT_REASONS,
-  direct, mayList, isAuthenticCategory, isAssured, deliverable, extraDays, rankOffers, offersFor, offerById,
+  direct, mayList, isAuthenticCategory, isAssured, deliverable, national, extraDays, rankOffers, offersFor, offerById,
   syncProduct, syncSellerProducts, moveStock, computeScore, refreshScore, commissionPct, backfill, publicSeller,
 };

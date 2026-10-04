@@ -5,6 +5,10 @@ const db = require('../db');
 const market = require('../market');
 const routing = require('../routing');
 const settlement = require('../settlement');
+const crypto = require('node:crypto');
+const geo = require('../geo');
+const hyper = require('../hyperlocal');
+const resell = require('../resell');
 const notify = require('../notify');
 const { invoice, label } = require('../invoice');
 const { autoCheck, findDuplicates } = require('../listing');
@@ -22,12 +26,13 @@ function tellSeller(d, s, text) {
 // ---------- Seller approvals ----------
 router.get('/sellers', (req, res) => {
   const status = ['pending', 'approved', 'rejected', 'suspended'].includes(req.query.status) ? req.query.status : null;
+  const lane = ['brand', 'standard', 'value', 'shop'].includes(req.query.lane) ? req.query.lane : null;
   const d = db.get();
   const rows = d.prepare(`SELECT s.*, u.email AS account_email,
       (SELECT COUNT(*) FROM offers o WHERE o.seller_id = s.id AND o.active = 1) AS offers,
       (SELECT COUNT(*) FROM orders o WHERE o.seller_id = s.id) AS orders
-      FROM sellers s LEFT JOIN users u ON u.id = s.user_id WHERE s.lane != 'direct' ${status ? 'AND s.status = ?' : ''}
-     ORDER BY CASE s.status WHEN 'pending' THEN 0 ELSE 1 END, s.created_at DESC LIMIT 200`).all(...(status ? [status] : []));
+      FROM sellers s LEFT JOIN users u ON u.id = s.user_id WHERE s.lane != 'direct' ${status ? 'AND s.status = ?' : ''} ${lane ? 'AND s.lane = ?' : ''}
+     ORDER BY CASE s.status WHEN 'pending' THEN 0 ELSE 1 END, s.created_at DESC LIMIT 200`).all(...(status ? [status] : []), ...(lane ? [lane] : []));
   res.json({ sellers: rows.map((s) => ({ ...s, bank_ref: undefined, performance: market.computeScore(d, s.id) })) });
 });
 
@@ -142,14 +147,148 @@ router.get('/settlement', (_req, res) => {
     bySeller.set(s.id, row);
   }
   const payouts = d.prepare(`SELECT p.*, s.display_name AS seller FROM payouts p JOIN sellers s ON s.id = p.seller_id ORDER BY p.id DESC LIMIT 100`).all();
-  res.json({ due: [...bySeller.values()], payouts, reconciliation: settlement.reconciliation(d), returnWindowDays: config.returnWindowDays,
+  // Resellers whose sales are past the return window.
+  const resellerDue = d.prepare(`SELECT r.id, r.display_name, r.upi_id, COUNT(*) AS items, SUM(i.reseller_margin * i.qty) AS gross FROM order_items i
+      JOIN orders o ON o.id = i.order_id JOIN reseller_shares sh ON sh.id = i.share_id JOIN resellers r ON r.id = sh.reseller_id
+     WHERE i.reseller_margin > 0 AND i.reseller_payout_id IS NULL AND o.status = 'delivered' AND o.delivered_at <= ? AND r.status = 'active'
+     GROUP BY r.id ORDER BY gross DESC`).all(Date.now() - config.returnWindowDays * 86400_000);
+  const resellerPayouts = d.prepare(`SELECT p.*, r.display_name AS reseller FROM reseller_payouts p JOIN resellers r ON r.id = p.reseller_id
+     ORDER BY p.id DESC LIMIT 50`).all();
+  res.json({ due: [...bySeller.values()], payouts, resellerDue, resellerPayouts, reconciliation: settlement.reconciliation(d), returnWindowDays: config.returnWindowDays,
     rates: { tcsPct: config.market.tcsPct, tdsPct: config.market.tdsPct, gstOnFeesPct: config.market.gstOnFeesPct } });
 });
 
 router.post('/settlement/run', (req, res) => {
-  const made = db.tx((d) => settlement.run(d));
-  audit(req, 'admin.settlement_run', { payouts: made.length, total: made.reduce((s, p) => s + p.net, 0) });
+  const { made, resellers } = db.tx((d) => ({ made: settlement.run(d), resellers: resell.run(d) }));
+  audit(req, 'admin.settlement_run', { payouts: made.length, total: made.reduce((s, p) => s + p.net, 0), resellerPayouts: resellers.length });
+  res.json({ payouts: made, resellerPayouts: resellers });
+});
+
+// ---------- Express: riders and the live board (blueprint stages 6 to 8) ----------
+const DAY = 86400_000;
+const IST = 330 * 60000;
+const dayStart = (ts) => { const t = new Date(ts + IST); return Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) - IST; };
+
+router.get('/riders', (req, res) => {
+  const d = db.get();
+  const today = dayStart(Date.now());
+  const riders = d.prepare(`SELECT r.*,
+      (SELECT COUNT(*) FROM orders o WHERE o.rider_id = r.id AND o.status = 'delivered' AND o.delivered_at >= ?) AS today_orders,
+      (SELECT COALESCE(SUM(o.rider_fee), 0) FROM orders o WHERE o.rider_id = r.id AND o.status = 'delivered' AND o.delivered_at >= ?) AS today_earned,
+      (SELECT COUNT(*) FROM orders o WHERE o.rider_id = r.id AND o.status = 'delivered' AND o.rider_payout_id IS NULL) AS unpaid_orders,
+      (SELECT COALESCE(SUM(o.rider_fee), 0) FROM orders o WHERE o.rider_id = r.id AND o.status = 'delivered' AND o.rider_payout_id IS NULL) AS unpaid
+      FROM riders r ORDER BY r.city, r.name`).all(today, today);
+  for (const r of riders) r.load = hyper.riderLoad(d, r.id);
+  res.json({ riders, cities: Object.values(geo.CITY_CENTRES).map((c) => c.city),
+    payouts: d.prepare('SELECT p.*, r.name FROM rider_payouts p JOIN riders r ON r.id = p.rider_id ORDER BY p.id DESC LIMIT 30').all(),
+    rules: { maxLoad: config.express.riderMaxLoad, feeBase: config.express.riderFeeBase, feePerKm: config.express.riderFeePerKm } });
+});
+
+router.post('/riders', (req, res) => {
+  const name = v.str(req.body.name, 'Rider name', { min: 2, max: 60 });
+  const phone = v.phone(req.body.phone);
+  const c = Object.values(geo.CITY_CENTRES).find((x) => x.city === req.body.city);
+  if (!c) throw new HttpError(400, 'Please choose an Express city.');
+  const id = Number(db.get().prepare('INSERT INTO riders (name, phone, city, lat, lng, active, created_at) VALUES (?,?,?,?,?,1,?)')
+    .run(name, phone, c.city, c.lat, c.lng, Date.now()).lastInsertRowid);
+  audit(req, 'admin.rider_add', { riderId: id });
+  res.status(201).json({ id });
+});
+
+router.patch('/riders/:id', (req, res) => {
+  const id = v.int(req.params.id, 'Rider', { min: 1 });
+  const r = db.get().prepare('UPDATE riders SET active = ? WHERE id = ?').run(req.body.active ? 1 : 0, id);
+  if (!r.changes) throw new HttpError(404, 'Rider not found.');
+  audit(req, 'admin.rider', { riderId: id, active: !!req.body.active });
+  res.json({ ok: true });
+});
+
+/** Pays every rider for their delivered, unpaid Express trips. */
+router.post('/riders/pay', (req, res) => {
+  const made = db.tx((d) => {
+    const due = d.prepare(`SELECT rider_id, COUNT(*) AS n, SUM(rider_fee) AS amount FROM orders WHERE rider_id IS NOT NULL AND status = 'delivered'
+      AND rider_payout_id IS NULL GROUP BY rider_id`).all();
+    const out = [];
+    for (const x of due) {
+      const utr = config.paymentProvider === 'test' ? `TESTUTR${crypto.randomInt(1e9, 1e10)}` : null;
+      const pid = Number(d.prepare('INSERT INTO rider_payouts (rider_id, amount, orders, utr, created_at) VALUES (?,?,?,?,?)')
+        .run(x.rider_id, x.amount, x.n, utr, Date.now()).lastInsertRowid);
+      d.prepare("UPDATE orders SET rider_payout_id = ? WHERE rider_id = ? AND status = 'delivered' AND rider_payout_id IS NULL").run(pid, x.rider_id);
+      out.push({ riderId: x.rider_id, amount: x.amount, orders: x.n });
+    }
+    return out;
+  });
+  audit(req, 'admin.rider_pay', { riders: made.length, total: made.reduce((s, x) => s + x.amount, 0) });
   res.json({ payouts: made });
+});
+
+/** Every Express order still moving: the shop or city store, the rider and the expected times. */
+router.get('/express', (_req, res) => {
+  routing.sweep();
+  hyper.tick(db);
+  const d = db.get();
+  const rows = d.prepare(`SELECT o.id, o.order_no, o.status, o.address, o.created_at, o.accept_by, o.promised_at, o.rider_id, o.eta_pickup, o.eta_drop,
+      o.rider_picked_at, o.route, o.rider_fee, s.display_name AS seller, s.lane, r.name AS rider
+      FROM orders o LEFT JOIN sellers s ON s.id = o.seller_id LEFT JOIN riders r ON r.id = o.rider_id
+     WHERE o.delivery_speed = 'express' AND o.status IN ('placed','confirmed','packed','shipped','out_for_delivery') ORDER BY o.created_at`).all();
+  const now = Date.now();
+  res.json({ now, orders: rows.map((o) => {
+    const a = JSON.parse(o.address);
+    return { id: o.id, orderNo: o.order_no, status: o.status, from: o.lane === 'shop' ? o.seller : `Bazaario city store (${o.seller})`,
+      to: `${a.city} ${a.pincode}`, createdAt: o.created_at, acceptBy: o.accept_by, promisedAt: o.promised_at, rider: o.rider,
+      etaPickup: o.eta_pickup, etaDrop: o.eta_drop, pickedAt: o.rider_picked_at, km: o.route ? JSON.parse(o.route).km : null, riderFee: o.rider_fee,
+      late: !!o.promised_at && o.promised_at < now, position: o.route ? hyper.position(o, now) : null };
+  }) });
+});
+
+/** Rider updates entered from Studio when a rider has no app: picked up, or handed over. */
+router.post('/express/:id/:step', (req, res) => {
+  const id = v.int(req.params.id, 'Order', { min: 1 });
+  const step = req.params.step;
+  if (!['assign', 'pickup', 'deliver'].includes(step)) throw new HttpError(404, 'Not found.');
+  db.tx((d) => {
+    const o = d.prepare("SELECT * FROM orders WHERE id = ? AND delivery_speed = 'express'").get(id);
+    if (!o) throw new HttpError(404, 'Express order not found.');
+    if (step === 'assign') {
+      if (o.status !== 'packed') throw new HttpError(400, 'A rider is assigned once the order is packed.');
+      // Reassign: free the current rider and pick again.
+      d.prepare('UPDATE orders SET rider_id = NULL, route = NULL WHERE id = ?').run(id);
+      if (!hyper.dispatch(d, id)) throw new HttpError(409, 'Every rider in this city is busy. The order will get the next free rider.');
+    } else if (step === 'pickup') {
+      if (o.status !== 'packed' || !o.rider_id) throw new HttpError(400, 'Only a packed order with a rider can be picked up.');
+      hyper.pickedUp(d, id);
+    } else {
+      if (o.status !== 'out_for_delivery' || !o.rider_id) throw new HttpError(400, 'Only an order out for delivery can be handed over.');
+      hyper.delivered(d, id);
+    }
+  });
+  audit(req, 'admin.express', { orderId: id, step });
+  res.json({ ok: true });
+});
+
+// ---------- Resellers ----------
+router.get('/resellers', (_req, res) => {
+  const d = db.get();
+  const rows = d.prepare(`SELECT r.*, u.email, (SELECT COUNT(*) FROM reseller_shares sh WHERE sh.reseller_id = r.id AND sh.active = 1) AS shares,
+      (SELECT COALESCE(SUM(views), 0) FROM reseller_shares sh WHERE sh.reseller_id = r.id) AS views
+      FROM resellers r JOIN users u ON u.id = r.user_id ORDER BY r.created_at DESC LIMIT 200`).all();
+  res.json({ resellers: rows.map((r) => {
+    const sales = resell.sales(d, r.id);
+    return { ...r, pan: r.pan ? `${r.pan.slice(0, 2)}XXXXX${r.pan.slice(7)}` : null, orders: new Set(sales.map((x) => x.orderId)).size,
+      earned: sales.filter((x) => x.stage !== 'lost').reduce((s, x) => s + x.earn, 0) };
+  }) });
+});
+
+router.patch('/resellers/:id', (req, res) => {
+  const id = v.int(req.params.id, 'Reseller', { min: 1 });
+  const action = req.body.action;
+  if (!['suspend', 'reinstate'].includes(action)) throw new HttpError(400, 'Unknown action.');
+  const note = v.str(req.body.note, 'Reason', { min: 3, max: 300, optional: action === 'reinstate' });
+  const r = db.get().prepare('UPDATE resellers SET status = ?, status_note = ? WHERE id = ?')
+    .run(action === 'suspend' ? 'suspended' : 'active', note || '', id);
+  if (!r.changes) throw new HttpError(404, 'Reseller not found.');
+  audit(req, 'admin.reseller', { resellerId: id, action });
+  res.json({ ok: true });
 });
 
 router.get('/orders/:id/documents', (req, res) => {

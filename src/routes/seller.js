@@ -12,6 +12,7 @@ const { readDetails, autoCheck, findDuplicates } = require('../listing');
 const { saveProductPhoto } = require('../uploads');
 const { move } = require('../fulfilment');
 const { INDIAN_STATES } = require('../states');
+const geo = require('../geo');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 /**
@@ -26,6 +27,8 @@ const LANES = {
   brand: { name: 'Brand', docs: 'GSTIN, PAN, bank account and trademark number', fee: 'Commission 5-15% by category' },
   standard: { name: 'Standard seller', docs: 'GSTIN, PAN and bank account', fee: 'Commission 5-15% by category' },
   value: { name: 'Value seller', docs: 'PAN, bank account and GST enrolment ID', fee: '0% commission. You sell within your own state.' },
+  shop: { name: 'Partner shop', docs: 'PAN (or GSTIN), bank account, shop address, delivery radius and hours',
+    fee: `${config.express.shopCommission}% commission. Deliver to your neighbourhood by Express and get paid the day after delivery.` },
 };
 const FULFILMENT = {
   fulfilled: { name: 'Bazaario Fulfilled', text: 'You send stock to our warehouse; we pack and ship every order.' },
@@ -51,14 +54,18 @@ function ownView(s) {
     legalName: s.legal_name, gstin: s.gstin, enrolmentId: s.enrolment_id, pan: s.pan, brandName: s.brand_name, trademarkNo: s.trademark_no,
     bank: s.bank_last4 ? { ifsc: s.bank_ifsc, last4: s.bank_last4, nameAtBank: s.bank_name_at_bank } : null,
     phone: s.phone, email: s.email, pickup: { line1: s.pickup_line1, city: s.pickup_city, state: s.pickup_state, pincode: s.pickup_pincode },
-    fulfilment: s.fulfilment, fulfilmentName: FULFILMENT[s.fulfilment].name, status: s.status, statusNote: s.status_note, score: s.score,
-    createdAt: s.created_at, approvedAt: s.approved_at,
+    fulfilment: s.fulfilment, fulfilmentName: s.lane === 'shop' ? 'Bazaario Express riders' : FULFILMENT[s.fulfilment].name,
+    status: s.status, statusNote: s.status_note, score: s.score, createdAt: s.created_at, approvedAt: s.approved_at,
+    shop: s.lane === 'shop' ? { radiusKm: s.radius_km, openHour: s.open_hour, closeHour: s.close_hour, accepting: !!s.accepting, fssai: s.fssai,
+      lat: s.lat, lng: s.lng } : null,
   };
 }
 
 const plans = () => ({
   lanes: LANES, fulfilment: FULFILMENT, commission: M.commission, fulfilmentFee: M.fulfilmentFee, gstOnFeesPct: M.gstOnFeesPct,
   tcsPct: M.tcsPct, tdsPct: M.tdsPct, acceptHours: M.acceptHours, authenticCategories: M.authenticCategories,
+  shopCommission: config.express.shopCommission, shopAcceptMins: config.express.shopAcceptMs / 60000, shopRadiusKm: config.express.shopRadiusKm,
+  shopPayoutDays: config.express.shopPayoutDays,
   specs: market.CATEGORY_SPECS, gstRates: market.GST_RATES, bestBeforeCategories: M.bestBeforeCategories,
 });
 
@@ -92,7 +99,8 @@ router.post('/apply', (req, res) => {
   if (existing && existing.status !== 'rejected') throw new HttpError(409, 'You already have a seller account.');
   const lane = String(b.lane || '');
   if (!LANES[lane]) throw new HttpError(400, 'Please choose how you want to sell.');
-  const fulfilment = String(b.fulfilment || '');
+  // Partner shops hand every order to a Bazaario Express rider.
+  const fulfilment = lane === 'shop' ? 'pickup' : String(b.fulfilment || '');
   if (!FULFILMENT[fulfilment]) throw new HttpError(400, 'Please choose how your orders will be shipped.');
   if (b.agree !== true) throw new HttpError(400, 'Please accept the seller terms.');
   const displayName = v.str(b.displayName, 'Shop name', { min: 3, max: 60 });
@@ -109,7 +117,30 @@ router.post('/apply', (req, res) => {
   let gstin = null;
   let enrolment = null;
   let pan;
-  if (lane === 'value') {
+  let shop = null;
+  if (lane === 'shop') {
+    // A neighbourhood shop may not be registered for GST: then its PAN is enough.
+    if (b.gstin) {
+      const g = kyc.gstin(b.gstin);
+      if (g.state !== pickup.state) throw new HttpError(400, `This GSTIN is registered in ${g.state}. Your shop must be in the same state.`);
+      gstin = g.gstin;
+      pan = g.pan;
+    } else {
+      pan = kyc.pan(b.pan);
+      if (b.enrolmentId) enrolment = kyc.enrolmentId(b.enrolmentId);
+    }
+    if (!geo.locate(pickup.pincode)) {
+      throw new HttpError(400, `Express runs in ${Object.values(geo.CITY_CENTRES).map((c) => c.city).join(', ')}. Your shop's PIN code is outside these cities for now.`);
+    }
+    const R = config.express.shopRadiusKm;
+    shop = {
+      radius: v.int(b.radiusKm, 'Delivery radius (km)', { min: R.min, max: R.max }),
+      open: v.int(b.openHour, 'Opening time', { min: 0, max: 23 }),
+      close: v.int(b.closeHour, 'Closing time', { min: 1, max: 24 }),
+      fssai: b.fssai ? v.str(b.fssai, 'FSSAI licence number', { pattern: /^\d{14}$/ }) : null,
+    };
+    if (shop.close <= shop.open) throw new HttpError(400, 'Closing time must be after opening time.');
+  } else if (lane === 'value') {
     enrolment = kyc.enrolmentId(b.enrolmentId);
     pan = kyc.pan(b.pan);
   } else {
@@ -148,6 +179,14 @@ router.post('/apply', (req, res) => {
     d.prepare('UPDATE sellers SET code = ? WHERE id = ?').run(`SL${String(sid).padStart(5, '0')}`, sid);
     return sid;
   });
+  if (shop) {
+    // The test geocoder places the shop inside its PIN code; a real geocoder would use the street address.
+    const at = geo.locate(pickup.pincode, String(id));
+    db.get().prepare('UPDATE sellers SET lat = ?, lng = ?, radius_km = ?, open_hour = ?, close_hour = ?, fssai = ?, accepting = 1 WHERE id = ?')
+      .run(at.lat, at.lng, shop.radius, shop.open, shop.close, shop.fssai, id);
+  } else {
+    db.get().prepare('UPDATE sellers SET lat = NULL, lng = NULL, radius_km = NULL, open_hour = NULL, close_hour = NULL WHERE id = ?').run(id);
+  }
   audit(req, 'seller.apply', { sellerId: id, lane });
   res.status(201).json({ seller: ownView(mySeller(req.user.id)) });
 });
@@ -285,6 +324,7 @@ function submitProduct(req, existing) {
 }
 
 router.post('/products', requireSeller, (req, res) => {
+  if (req.seller.lane === 'shop') throw new HttpError(400, 'Partner shops add their stock to products already on Bazaario. Search for the product to sell it.');
   const { details: p, offer, auto, note } = submitProduct(req);
   const id = db.tx((d) => {
     const now = Date.now();
@@ -404,7 +444,8 @@ router.post('/orders/:id/pack', requireSeller, (req, res) => {
   db.tx((d) => {
     const o = ownOrder(req, id);
     move(d, o.id, 'packed', { actor: 'seller' });
-    if (req.seller.fulfilment === 'pickup') {
+    // Express orders get a rider when packed; other Pickup orders get a courier booking and tracking number.
+    if (req.seller.fulfilment === 'pickup' && o.delivery_speed !== 'express') {
       const courier = config.courierProvider === 'test' ? 'Bazaario Logistics' : config.courierProvider;
       const awb = `BZL${crypto.randomInt(1e9, 1e10)}`;
       d.prepare('UPDATE orders SET courier = ?, awb = ? WHERE id = ?').run(courier, awb, o.id);
@@ -418,6 +459,7 @@ router.post('/orders/:id/pack', requireSeller, (req, res) => {
 router.post('/orders/:id/ship', requireSeller, (req, res) => {
   const id = v.int(req.params.id, 'Order', { min: 1 });
   sellerShips(req);
+  if (req.seller.lane === 'shop') throw new HttpError(400, 'The Bazaario Express rider collects the order from your shop.');
   let courier;
   let awb;
   if (req.seller.fulfilment === 'self') {

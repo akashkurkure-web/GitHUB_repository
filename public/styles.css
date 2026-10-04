@@ -475,6 +475,59 @@ details.payout[open] summary { margin-bottom: 8px; }
 .inv-table th { background: #F1F1F1; font-weight: 600; }
 .inv-total td { font-weight: 600; background: #FAFAFA; }
 
+
+/* Bazaario Express: nearby shops, live tracking, Shop Partner app */
+.near { border: 1px solid var(--teal); border-radius: var(--r-card); background: var(--teal-tint); padding: 8px 12px; margin: 8px 0; }
+.near-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.near-head b { color: var(--teal-dark); }
+.near-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid rgba(15, 94, 91, .15); }
+.near-row:first-of-type { border-top: 0; }
+.near-off { opacity: .7; }
+.near-switch { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin: 2px 0; color: var(--teal-dark); }
+.track-card { margin-top: 16px; }
+.track-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px; }
+.track-head h3 { font-size: 18px; margin-bottom: 2px; }
+.rider-chip { display: flex; gap: 10px; align-items: center; }
+.trip-map { display: block; width: 100%; max-width: 520px; height: auto; border: 1px solid var(--line); border-radius: var(--r-img); }
+.map-bg { fill: #F3F6F4; }
+.map-grid { stroke: #E2E8E4; stroke-width: 1; }
+.map-path { stroke: var(--teal); stroke-width: 3; stroke-linecap: round; opacity: .45; }
+.map-path-live { opacity: 1; }
+.map-path-pickup { stroke: var(--ink-soft); stroke-width: 2; stroke-dasharray: 5 5; opacity: .7; }
+.map-shop { fill: var(--surface); stroke: var(--teal-dark); stroke-width: 2.5; }
+.map-home { fill: var(--surface); stroke: var(--clay); stroke-width: 3; }
+.map-rider { fill: var(--teal); }
+.map-rider-ring { fill: rgba(15, 94, 91, .16); stroke: var(--teal); stroke-width: 1; }
+.map-label { font: 600 10px var(--font); fill: var(--ink); paint-order: stroke; stroke: #F3F6F4; stroke-width: 4px; }
+.map-scale { stroke: var(--ink-soft); stroke-width: 2; }
+.shop-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.shop-state { display: flex; gap: 8px; align-items: center; }
+.shop-state .status { margin: 0; }
+.shop-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.shop-col h3 { display: flex; align-items: center; }
+.shop-order { border-top: 1px solid var(--line); padding: 8px 0; display: grid; gap: 4px; }
+.shop-order:first-of-type { border-top: 0; }
+.shop-order-top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.shop-order-new { background: var(--saffron-tint); margin: 0 -8px; padding: 8px; border-radius: var(--r-btn); border-top: 0; margin-bottom: 6px; }
+.shop-order-done { opacity: .8; }
+.countdown { font-variant-numeric: tabular-nums; }
+.earn-chart { display: flex; gap: 4px; align-items: flex-end; height: 120px; margin: 8px 0 12px; }
+.earn-bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
+.earn-bar i { display: block; width: 100%; min-height: 2px; background: var(--teal); border-radius: 2px 2px 0 0; }
+.earn-bar span { font-size: 10px; color: var(--ink-soft); }
+
+/* Resellers */
+.resell-search { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.resell-search input { flex: 1 1 220px; }
+.resell-search select { width: auto; }
+.resell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.resell-card { display: grid; grid-template-columns: 88px 1fr; gap: 12px; align-items: start; }
+.resell-card .pimg { width: 88px; height: 88px; aspect-ratio: auto; font-size: 40px; }
+.resell-card > div { display: grid; gap: 4px; justify-items: start; }
+.resell-margin { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.resell-margin label { margin: 0; font-size: 12px; }
+.resell-margin input { width: 90px; min-height: 30px; padding: 4px 8px; }
+
 @media print {
   body { background: #fff; }
   .strip, .topbar, .chips, .footer, .no-print, .toast { display: none !important; }
@@ -484,6 +537,7 @@ details.payout[open] summary { margin-bottom: 8px; }
 }
 
 @media (max-width: 1080px) {
+  .shop-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pdp, .reviews, .two-col, .search-layout, .hero, .help-cols { grid-template-columns: 1fr; }
   .pdp-gallery, .filters, .two-col > .card:last-child { position: static; max-height: none; }
   .filters-fold > summary { display: block; cursor: pointer; padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: var(--r-btn); background: var(--surface); font-weight: 600; width: max-content; }
@@ -512,7 +566,8 @@ details.payout[open] summary { margin-bottom: 8px; }
   .line { grid-template-columns: 72px 1fr; gap: 10px; }
   .line-price { grid-column: 2; text-align: left; }
   .line-price .pricing { align-items: flex-start; }
-  .form-grid, .app-steps, .lane-grid, .inv-parties, .qc-grid { grid-template-columns: 1fr; }
+  .form-grid, .app-steps, .lane-grid, .inv-parties, .qc-grid, .shop-board { grid-template-columns: 1fr; }
+  .resell-grid { grid-template-columns: 1fr; }
   .offer-row { grid-template-columns: 1fr auto; }
   .stack-sm table, .stack-sm tbody, .stack-sm tr, .stack-sm td { display: block; }
   .stack-sm tr:first-child { display: none; }

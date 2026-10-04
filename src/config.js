@@ -93,6 +93,39 @@ module.exports = {
     holdNewAccountMs: 24 * 3600_000,
     holdBulkQty: 6,
   },
+  // ---------- Express from partner shops and riders (blueprint stages 1, 6, 7a and 8) ----------
+  express: {
+    // A partner shop must accept an Express order within 2 minutes, or the next shop is tried.
+    shopAcceptMs: 2 * 60_000,
+    // Shops choose how far they deliver.
+    shopRadiusKm: { min: 2, max: 5 },
+    // Minutes a shop or city store takes to pack an Express order.
+    prepMins: 10,
+    // Rider travel: average city speed, a factor for roads not being straight lines, and the hand-over time.
+    riderSpeedKmh: 18,
+    roadFactor: 1.3,
+    handoverMins: 2,
+    // A rider carries at most this many Express orders at once.
+    riderMaxLoad: 2,
+    // Rider pay per delivery: a base fee plus a fee per km from pickup to drop (paise).
+    riderFeeBase: 3000,
+    riderFeePerKm: 800,
+    // Commission on the item price for partner shops; they are paid the day after delivery.
+    shopCommission: 10,
+    shopPayoutDays: 1,
+    // In test mode riders move on their own along the route, so Express orders can be followed end to end.
+    simulateRiders: (env.COURIER_PROVIDER || 'test') === 'test' && env.RIDER_SIMULATION !== '0',
+  },
+
+  // ---------- Resellers (blueprint stages 3, 10 and 12) ----------
+  reseller: {
+    // A reseller adds their own margin on top of Bazaario's price, up to this share of the price and never above MRP.
+    maxMarginPct: 30,
+    // Income-tax TDS on commission (section 194H) once a reseller's earnings in the financial year cross the threshold.
+    // Placeholders: have a CA confirm the rate and threshold.
+    tdsPct: 2,
+    tdsThreshold: 2000000,
+  },
   adminEmail: env.ADMIN_EMAIL || 'admin@bazaario.local',
   adminPassword: env.ADMIN_PASSWORD || null,
 };

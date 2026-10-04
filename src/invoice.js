@@ -29,7 +29,8 @@ function supplierOf(seller) {
 function invoice(d, orderId) {
   const o = d.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   const seller = d.prepare('SELECT * FROM sellers WHERE id = ?').get(o.seller_id);
-  const items = d.prepare('SELECT title, hsn, gst_rate, price, qty FROM order_items WHERE order_id = ? ORDER BY id').all(orderId);
+  const items = d.prepare(`SELECT i.title, i.hsn, i.gst_rate, i.price, i.qty, i.reseller_margin, r.display_name AS reseller FROM order_items i
+    LEFT JOIN reseller_shares sh ON sh.id = i.share_id LEFT JOIN resellers r ON r.id = sh.reseller_id WHERE i.order_id = ? ORDER BY i.id`).all(orderId);
   const buyer = JSON.parse(o.address);
   const supplier = supplierOf(seller);
   const taxInvoice = !!supplier.gstin;
@@ -40,12 +41,14 @@ function invoice(d, orderId) {
     const amount = it.price * it.qty;
     const share = i === items.length - 1 ? left : Math.floor((o.discount * amount) / Math.max(1, o.subtotal));
     left -= share;
-    const value = amount - share;
+    // A reseller's margin is their own charge to the buyer, not part of the seller's sale.
+    const own = (it.price - it.reseller_margin) * it.qty;
+    const value = own - Math.round((share * own) / Math.max(1, amount));
     const rate = taxInvoice ? it.gst_rate : 0;
     const taxable = Math.round((value * 100) / (100 + rate));
     const tax = value - taxable;
     const cgst = intra ? Math.floor(tax / 2) : 0;
-    return { title: it.title, hsn: it.hsn, qty: it.qty, unitPrice: it.price, discount: share, taxable, rate, cgst, sgst: intra ? tax - cgst : 0,
+    return { title: it.title, hsn: it.hsn, qty: it.qty, unitPrice: it.price - it.reseller_margin, discount: share, taxable, rate, cgst, sgst: intra ? tax - cgst : 0,
       igst: intra ? 0 : tax, total: value };
   });
   const tot = (k) => lines.reduce((s, l) => s + l[k], 0);
@@ -58,6 +61,8 @@ function invoice(d, orderId) {
     placeOfSupply: buyer.state, intraState: intra, lines,
     totals: { taxable: tot('taxable'), cgst: tot('cgst'), sgst: tot('sgst'), igst: tot('igst'), total: tot('total') },
     fees: o.shipping,
+    reseller: items.some((it) => it.reseller_margin)
+      ? { name: items.find((it) => it.reseller_margin).reseller, margin: items.reduce((s2, it) => s2 + it.reseller_margin * it.qty, 0) } : null,
     note: taxInvoice ? 'Prices include GST. Tax is not payable on reverse charge.'
       : 'Bill of supply. The seller is not registered for GST and does not charge GST.',
   };

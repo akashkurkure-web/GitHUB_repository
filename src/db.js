@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS sellers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   code TEXT NOT NULL UNIQUE,
   user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
-  lane TEXT NOT NULL CHECK (lane IN ('direct','brand','standard','value')),
+  lane TEXT NOT NULL CHECK (lane IN ('direct','brand','standard','value','shop')),
   display_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   legal_name TEXT NOT NULL,
   gstin TEXT,
@@ -339,6 +339,67 @@ CREATE TABLE IF NOT EXISTS payout_lines (
   net INTEGER NOT NULL
 );
 
+-- ---------- Express riders (blueprint stages 6, 7a and 8) ----------
+CREATE TABLE IF NOT EXISTS riders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  city TEXT NOT NULL,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
+-- Riders are paid daily for the Express deliveries they completed.
+CREATE TABLE IF NOT EXISTS rider_payouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rider_id INTEGER NOT NULL REFERENCES riders(id),
+  amount INTEGER NOT NULL,
+  orders INTEGER NOT NULL,
+  utr TEXT,
+  created_at INTEGER NOT NULL
+);
+
+-- ---------- Resellers (blueprint stages 3, 10 and 12) ----------
+CREATE TABLE IF NOT EXISTS resellers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  upi_id TEXT NOT NULL,
+  pan TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active','suspended')),
+  status_note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
+-- A product a reseller shared, with the margin they add on top of Bazaario's price.
+CREATE TABLE IF NOT EXISTS reseller_shares (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  reseller_id INTEGER NOT NULL REFERENCES resellers(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  margin INTEGER NOT NULL CHECK (margin >= 0),
+  views INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (reseller_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS reseller_payouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payout_no TEXT NOT NULL UNIQUE,
+  reseller_id INTEGER NOT NULL REFERENCES resellers(id),
+  gross INTEGER NOT NULL,
+  tds INTEGER NOT NULL,
+  net INTEGER NOT NULL,
+  utr TEXT,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -389,6 +450,28 @@ const ADDED_COLUMNS = [
   ['orders', 'hold_reason', 'TEXT'],
   ['orders', 'route_reason', "TEXT NOT NULL DEFAULT ''"],
   ['orders', 'payout_id', 'INTEGER'],
+  // Partner shops for Express: where they are, how far they deliver, their hours, and whether they take orders now.
+  ['sellers', 'lat', 'REAL'],
+  ['sellers', 'lng', 'REAL'],
+  ['sellers', 'radius_km', 'REAL'],
+  ['sellers', 'open_hour', 'INTEGER'],
+  ['sellers', 'close_hour', 'INTEGER'],
+  ['sellers', 'accepting', 'INTEGER NOT NULL DEFAULT 1'],
+  ['sellers', 'fssai', 'TEXT'],
+  // Express rider on the order, the route and the times the rider is expected at the shop and at the buyer.
+  ['orders', 'rider_id', 'INTEGER'],
+  ['orders', 'rider_assigned_at', 'INTEGER'],
+  ['orders', 'rider_picked_at', 'INTEGER'],
+  ['orders', 'eta_pickup', 'INTEGER'],
+  ['orders', 'eta_drop', 'INTEGER'],
+  ['orders', 'route', 'TEXT'],
+  ['orders', 'rider_fee', 'INTEGER NOT NULL DEFAULT 0'],
+  ['orders', 'rider_payout_id', 'INTEGER'],
+  // Bought through a reseller's share: their margin per unit is part of the price and is paid to them.
+  ['cart_items', 'share_id', 'INTEGER'],
+  ['order_items', 'share_id', 'INTEGER'],
+  ['order_items', 'reseller_margin', 'INTEGER NOT NULL DEFAULT 0'],
+  ['order_items', 'reseller_payout_id', 'INTEGER'],
 ];
 
 /** Brings databases created by older versions up to the current schema. */
@@ -419,6 +502,28 @@ function migrate(d) {
   }
 
   const exists = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+  // Sellers gained the partner shop lane. The table is rebuilt once to widen its CHECK rule, keeping every row.
+  const sellersSql = exists('sellers') ? d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sellers'").get().sql : '';
+  if (sellersSql && !sellersSql.includes("'shop'")) {
+    const create = SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS sellers ('), SCHEMA.indexOf('-- One product page, many sellers'))
+      .replace('CREATE TABLE IF NOT EXISTS sellers (', 'CREATE TABLE sellers_new (');
+    const keep = d.prepare('PRAGMA table_info(sellers)').all().map((c) => c.name)
+      .filter((c) => create.includes(`\n  ${c} `)).join(', ');
+    d.exec('PRAGMA foreign_keys = OFF');
+    try {
+      d.exec('BEGIN IMMEDIATE');
+      d.exec(create);
+      d.exec(`INSERT INTO sellers_new (${keep}) SELECT ${keep} FROM sellers`);
+      d.exec('DROP TABLE sellers');
+      d.exec('ALTER TABLE sellers_new RENAME TO sellers');
+      d.exec('COMMIT');
+    } catch (err) {
+      d.exec('ROLLBACK');
+      throw err;
+    } finally {
+      d.exec('PRAGMA foreign_keys = ON');
+    }
+  }
   for (const [table, col, decl] of ADDED_COLUMNS) {
     if (!exists(table)) continue;
     const have = d.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
@@ -426,6 +531,8 @@ function migrate(d) {
   }
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_id)');
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_checkout ON orders(checkout_ref)');
+  d.exec('CREATE INDEX IF NOT EXISTS idx_orders_rider ON orders(rider_id)');
+  if (exists('order_items')) d.exec('CREATE INDEX IF NOT EXISTS idx_items_share ON order_items(share_id)');
   // Every product gets a Bazaario Direct offer from its old price and stock (needs the market module, loaded late).
   if (exists('sellers')) require('./market').backfill(d);
 }

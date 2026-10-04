@@ -5,16 +5,23 @@ const { HttpError } = require('./security');
 const delivery = require('./delivery');
 const wallet = require('./wallet');
 const market = require('./market');
+const geo = require('./geo');
+const hyper = require('./hyperlocal');
+const resell = require('./resell');
 
 /**
  * Server-side source of truth for the bag. Client-sent prices are never trusted.
- * Each line is bought from one offer: the one the buyer picked under "Other sellers", or else the best offer that can
- * deliver to `state` (Value sellers sell only within their own state).
+ * Each line is bought from one offer: the one the buyer picked (under "Other sellers" or "Express near you"), or else
+ * the best national offer that can deliver to `state` (Value sellers sell only within their own state).
+ * Partner shop offers deliver only inside the shop's radius while it is open; with a `pincode`, lines that a nearby
+ * shop could bring by Express carry that option as `nearby`.
+ * A line added from a reseller's share costs the offer price plus the reseller's margin.
  */
-function cartLines(userId, { state = null } = {}) {
+function cartLines(userId, { state = null, pincode = null, now = Date.now() } = {}) {
   const d = db.get();
+  const point = pincode ? geo.locate(pincode) : null;
   const rows = d.prepare(
-    `SELECT c.product_id, c.qty, c.offer_id AS chosen_offer_id, p.title, p.price AS list_price, p.mrp, p.emoji, p.color, p.image,
+    `SELECT c.product_id, c.qty, c.offer_id AS chosen_offer_id, c.share_id, p.title, p.price AS list_price, p.mrp, p.emoji, p.color, p.image,
             p.active, p.express, p.hsn, p.gst_rate, cat.slug AS category
        FROM cart_items c JOIN products p ON p.id = c.product_id JOIN categories cat ON cat.id = p.category_id
       WHERE c.user_id = ? AND c.saved_for_later = 0 ORDER BY c.added_at DESC`
@@ -29,15 +36,34 @@ function cartLines(userId, { state = null } = {}) {
       if (!usable(offer)) { offer = null; note = 'The seller you chose has stopped selling this item, so the next best offer is shown.'; }
     }
     if (!offer) {
-      const ranked = market.rankOffers(offers);
+      const ranked = market.rankOffers(offers.filter(market.national));
       offer = ranked.find((o) => market.deliverable(o, state)) || ranked[0] || null;
     }
-    const blocked = offer && !market.deliverable(offer, state) ? `${offer.seller_name} delivers only within ${offer.pickup_state}.` : '';
+    let blocked = offer && !market.deliverable(offer, state) ? `${offer.seller_name} delivers only within ${offer.pickup_state}.` : '';
+    let shop = null;
+    if (offer && offer.lane === 'shop') {
+      const serve = pincode ? hyper.shopServes(offer, point, now) : null;
+      if (serve && !serve.ok) blocked = serve.reason;
+      shop = serve && serve.ok ? { km: Math.round(serve.km * 10) / 10, mins: serve.mins, promisedAt: serve.promisedAt } : { km: null, mins: null };
+    }
+    let nearby = null;
+    if (point && offer && offer.lane !== 'shop') {
+      const n = hyper.nearbyOffers(d, r.product_id, point, now).find((x) => x.ok && x.offer.stock >= r.qty);
+      if (n) nearby = { offerId: n.offer.id, sellerName: n.offer.seller_name, price: n.offer.price, mins: n.mins, km: Math.round(n.km * 10) / 10 };
+    }
+    // Reseller margin on top of the offer price, while the share is active and the price stays within MRP.
+    const share = r.share_id ? resell.shareById(d, r.share_id) : null;
+    const margin = share && offer ? resell.fitMargin(share.margin, offer.price, r.mrp) : 0;
+    if (r.share_id && !share) note = note || 'The reseller link for this item has ended, so it is shown at the Bazaario price.';
     return {
       product_id: r.product_id, qty: r.qty, title: r.title, mrp: r.mrp, emoji: r.emoji, color: r.color, image: r.image,
       category: r.category, hsn: r.hsn, gst_rate: r.gst_rate,
       active: r.active && !!offer ? 1 : 0,
-      price: offer ? offer.price : r.list_price,
+      price: (offer ? offer.price : r.list_price) + margin,
+      seller_price: offer ? offer.price : r.list_price,
+      reseller_margin: margin,
+      share_id: share ? share.id : null,
+      reseller_name: share ? share.reseller_name : '',
       stock: offer ? offer.stock : 0,
       offer_id: offer ? offer.id : null,
       seller_id: offer ? offer.seller_id : null,
@@ -46,8 +72,9 @@ function cartLines(userId, { state = null } = {}) {
       pickup_state: offer ? offer.pickup_state : null,
       dispatch_days: offer ? offer.dispatch_days : 1,
       assured: offer && market.isAssured(offer, offer) ? 1 : 0,
-      // Express comes from Bazaario's own stock in city stores (partner shops join in Phase C).
-      express: offer && offer.lane === 'direct' ? r.express : 0,
+      // Express comes from Bazaario's city stores (Direct stock) or from a partner shop near the buyer.
+      express: offer && (offer.lane === 'shop' || (offer.lane === 'direct' && r.express)) ? 1 : 0,
+      shop, nearby,
       chosen: !!r.chosen_offer_id,
       blocked, note,
     };
@@ -62,7 +89,7 @@ function packagesOf(lines) {
     if (!map.has(key)) map.set(key, { sellerId: l.seller_id, sellerName: l.seller_name, lane: l.lane, lines: [], extraDays: 0 });
     const p = map.get(key);
     p.lines.push(l);
-    p.extraDays = Math.max(p.extraDays, market.extraDays(l));
+    p.extraDays = Math.max(p.extraDays, l.lane === 'shop' ? 0 : market.extraDays(l));
   }
   return [...map.values()];
 }
@@ -96,23 +123,32 @@ function codCheck(userId, pincode, payable) {
  * `opts.useWallet` spends wallet balance first. `payable` is what the chosen payment method must cover.
  */
 function quote(userId, couponCode, paymentMethod, opts = {}) {
-  const lines = cartLines(userId, { state: opts.state });
+  const now = Date.now();
+  const lines = cartLines(userId, { state: opts.state, pincode: opts.pincode, now });
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const mrpTotal = lines.reduce((s, l) => s + l.mrp * l.qty, 0);
   const { discount, coupon } = couponDiscount(couponCode, subtotal);
   const shipping = subtotal === 0 || subtotal >= config.freeShippingThreshold ? 0 : config.shippingFee;
   const packages = packagesOf(lines);
+  // Partner shop packages always come by Express; the speed the buyer picks applies to everything else.
+  const nationalLines = lines.filter((l) => l.lane !== 'shop');
+  const shopPacks = packages.filter((p) => p.lane === 'shop');
+  const shopReady = (p) => Math.max(...p.lines.map((l) => (l.shop && l.shop.promisedAt) || now));
   const slowest = packages.reduce((m, p) => Math.max(m, p.extraDays), 0);
-  const promise = opts.pincode ? delivery.options(opts.pincode, lines, Date.now(), slowest) : null;
-  const speeds = promise ? promise.options : [];
-  const chosen = speeds.find((o) => o.speed === opts.speed) || speeds.find((o) => o.speed === 'standard') || null;
-  const speed = chosen ? chosen.speed : 'standard';
-  if (promise) {
-    for (const p of packages) {
-      p.promisedAt = speed === 'express' ? chosen.promisedAt : delivery.standardPromise(delivery.zoneOf(opts.pincode).days + p.extraDays);
-    }
+  const promise = opts.pincode ? delivery.options(opts.pincode, nationalLines, now, slowest) : null;
+  let speeds = promise ? promise.options : [];
+  if (promise && !nationalLines.length && shopPacks.length) {
+    speeds = [{ speed: 'express', label: 'Express', promisedAt: Math.max(...shopPacks.map(shopReady)), fee: config.expressFee }];
   }
-  const expressFee = speed === 'express' ? config.expressFee : 0;
+  const chosen = speeds.find((o) => o.speed === opts.speed) || speeds.find((o) => o.speed === 'standard') || speeds[0] || null;
+  const speed = chosen ? chosen.speed : 'standard';
+  for (const p of packages) {
+    p.speed = p.lane === 'shop' ? 'express' : speed;
+    if (!promise) continue;
+    p.promisedAt = p.lane === 'shop' ? shopReady(p)
+      : speed === 'express' ? chosen.promisedAt : delivery.standardPromise(delivery.zoneOf(opts.pincode).days + p.extraDays, now);
+  }
+  const expressFee = packages.some((p) => p.speed === 'express') ? config.expressFee : 0;
   const codFee = paymentMethod === 'cod' ? config.codFee : 0;
   const total = subtotal - discount + shipping + expressFee + codFee;
   const walletBalance = wallet.balance(userId);
@@ -123,7 +159,7 @@ function quote(userId, couponCode, paymentMethod, opts = {}) {
     blocked: lines.filter((l) => l.blocked).map((l) => `${l.title}: ${l.blocked}`),
     subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, expressFee, codFee, total,
     walletBalance, walletApplied, payable,
-    speed, promisedAt: chosen ? chosen.promisedAt : null, speeds,
+    speed, promisedAt: chosen ? chosen.promisedAt : null, speeds, shopPackages: shopPacks.length,
     cod: codCheck(userId, opts.pincode, payable),
     emi: { ok: payable >= config.emiMinOrder, minOrder: config.emiMinOrder, months: config.emiMonths },
   };
