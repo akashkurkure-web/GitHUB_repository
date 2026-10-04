@@ -54,7 +54,8 @@ async function viewSell() {
   const me = state.user ? await api('GET', '/seller/me') : null;
   const plans = me ? me.plans : null;
   const s = me && me.seller;
-  if (s && s.status === 'approved') { location.hash = '#/seller'; return; }
+  if (s && s.status === 'approved') { location.hash = s.lane === 'shop' ? '#/shop' : '#/seller'; return; }
+  if (s && s.lane === 'shop') { location.hash = '#/partner'; return; }
 
   const laneCard = (k, l) => h('div', { class: 'card lane' }, h('h3', null, l.name), h('p', { class: 'small' }, l.fee), h('p', { class: 'hint' }, `You need: ${l.docs}`));
   const lanes = { brand: { name: 'Brand', fee: 'Commission 5-15% by category. Sell in every category, including beauty, mobiles and electronics.', docs: 'GSTIN, PAN, bank account and trademark number' },
@@ -87,8 +88,8 @@ async function viewSell() {
     applyForm(me, s));
 }
 
-function applyForm(me, prev) {
-  const sel = { lane: (prev && prev.lane) || 'standard', fulfilment: (prev && prev.fulfilment) || 'pickup' };
+function applyForm(me, prev, { shop = false } = {}) {
+  const sel = { lane: shop ? 'shop' : (prev && prev.lane !== 'shop' && prev.lane) || 'standard', fulfilment: (prev && prev.fulfilment) || 'pickup' };
   const inp = (attrs) => h('input', attrs);
   const f = {
     displayName: inp({ required: true, maxLength: 60, value: prev ? prev.displayName : '', placeholder: 'Shown to buyers, for example Sharma Home Store' }),
@@ -105,7 +106,15 @@ function applyForm(me, prev) {
     accountNumber: inp({ required: true, maxLength: 18, inputMode: 'numeric', autocomplete: 'off' }),
     accountConfirm: inp({ required: true, maxLength: 18, inputMode: 'numeric', autocomplete: 'off' }),
     ifsc: inp({ required: true, maxLength: 11, value: prev && prev.bank ? prev.bank.ifsc : '', placeholder: 'HDFC0001234', autocapitalize: 'characters' }),
+    fssai: inp({ maxLength: 14, inputMode: 'numeric', value: (prev && prev.shop && prev.shop.fssai) || '', placeholder: '14 digits, for food and grocery' }),
   };
+  // Partner shops: how far they deliver and when they are open.
+  const R = me.plans.shopRadiusKm || { min: 2, max: 5 };
+  const hourOpt = (hr, pick) => h('option', { value: hr, selected: hr === pick }, `${hr % 12 || 12}:00 ${hr < 12 || hr === 24 ? 'am' : 'pm'}${hr === 24 ? ' (midnight)' : ''}`);
+  const radius = h('select', null, Array.from({ length: R.max - R.min + 1 }, (_, i) => R.min + i)
+    .map((km) => h('option', { value: km, selected: km === ((prev && prev.shop && prev.shop.radiusKm) || 3) }, `${km} km`)));
+  const openHour = h('select', null, Array.from({ length: 24 }, (_, i) => hourOpt(i, (prev && prev.shop && prev.shop.openHour) ?? 8)));
+  const closeHour = h('select', null, Array.from({ length: 24 }, (_, i) => hourOpt(i + 1, (prev && prev.shop && prev.shop.closeHour) ?? 22)));
   const state_ = h('select', { required: true }, h('option', { value: '' }, 'Choose a state'),
     me.states.map((st) => h('option', { value: st, selected: prev && prev.pickup.state === st }, st)));
   const agree = h('input', { type: 'checkbox' });
@@ -119,11 +128,14 @@ function applyForm(me, prev) {
   });
 
   const gstBox = h('div', { class: 'form-grid' }, field('GSTIN', f.gstin, { hint: gstHint }));
-  const valueBox = h('div', { class: 'form-grid' }, field('PAN', f.pan), field('GST enrolment ID', f.enrolmentId, { hint: 'For sellers not registered for GST. You can sell only within your own state.' }));
+  const valueBox = h('div', { class: 'form-grid' }, field('PAN', f.pan), field(shop ? 'GST enrolment ID (optional)' : 'GST enrolment ID', f.enrolmentId,
+    { hint: shop ? 'Only if you have one. A shop not registered for GST can join with its PAN.' : 'For sellers not registered for GST. You can sell only within your own state.' }));
+  const shopBox = h('div', { class: 'form-grid' }, field('Delivery radius', radius, { hint: 'Express riders bring your orders to buyers within this distance.' }),
+    field('FSSAI licence (optional)', f.fssai), field('Opens at', openHour), field('Closes at', closeHour));
   const brandBox = h('div', { class: 'form-grid' }, field('Brand name', f.brandName), field('Trademark application or registration number', f.trademarkNo));
   const paintLane = () => {
     gstBox.classList.toggle('hidden', sel.lane === 'value');
-    valueBox.classList.toggle('hidden', sel.lane !== 'value');
+    valueBox.classList.toggle('hidden', sel.lane !== 'value' && sel.lane !== 'shop');
     brandBox.classList.toggle('hidden', sel.lane !== 'brand');
   };
   const radioCards = (name, options, key) => h('div', { class: 'choice-grid' }, Object.entries(options).map(([k, o]) => h('label', { class: 'addr-opt' + (sel[key] === k ? ' sel' : '') },
@@ -144,24 +156,34 @@ function applyForm(me, prev) {
     try {
       const body = { lane: sel.lane, fulfilment: sel.fulfilment, agree: agree.checked, pickupState: state_.value };
       for (const [k, el] of Object.entries(f)) body[k] = el.value.trim();
-      if (sel.lane === 'value') { delete body.gstin; } else { delete body.enrolmentId; if (!body.pan) delete body.pan; }
+      if (sel.lane === 'value') { delete body.gstin; } else if (sel.lane === 'shop') {
+        if (!body.gstin) delete body.gstin; else delete body.pan;
+        if (!body.enrolmentId) delete body.enrolmentId;
+        if (!body.fssai) delete body.fssai;
+        Object.assign(body, { radiusKm: Number(radius.value), openHour: Number(openHour.value), closeHour: Number(closeHour.value) });
+      } else { delete body.enrolmentId; if (!body.pan) delete body.pan; }
+      if (sel.lane !== 'shop') delete body.fssai;
       await api('POST', '/seller/apply', body);
-      toast('Application sent. We will email you once it is approved.');
+      toast(shop ? 'Shop registered. We will email you once it is approved.' : 'Application sent. We will email you once it is approved.');
       route();
     } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); err.scrollIntoView({ block: 'center' }); }
     submit.disabled = false;
   } },
-  h('h2', null, 'Register as a seller'), err,
-  h('h4', null, '1. How do you want to sell?'), radioCards('lane', me.plans.lanes, 'lane'),
-  h('h4', null, '2. Your business'),
+  h('h2', null, shop ? 'Register your shop' : 'Register as a seller'), err,
+  shop ? null : [h('h4', null, '1. How do you want to sell?'),
+    radioCards('lane', Object.fromEntries(Object.entries(me.plans.lanes).filter(([k]) => k !== 'shop')), 'lane'),
+    h('p', { class: 'hint' }, 'Run a neighbourhood shop? ', h('a', { href: '#/partner' }, 'Join as a partner shop'), ' and deliver by Express.')],
+  h('h4', null, `${shop ? 1 : 2}. Your business`),
   h('div', { class: 'form-grid' }, field('Shop name', f.displayName), field('Legal name', f.legalName), field('Mobile number', f.phone)),
+  shop ? h('p', { class: 'hint' }, 'Registered for GST? Enter your GSTIN. If not, leave it empty and enter your PAN below.') : null,
   gstBox, valueBox, brandBox,
-  h('h4', null, '3. Pickup address'),
+  h('h4', null, `${shop ? 2 : 3}. ${shop ? 'Shop address' : 'Pickup address'}`),
   h('div', { class: 'form-grid' }, field('Address', f.pickupLine1, { full: true }), field('City', f.pickupCity), field('State', state_), field('PIN code', f.pickupPincode)),
+  shop ? [h('h4', null, '3. Delivery area and hours'), shopBox] : null,
   h('h4', null, '4. Bank account for payouts'),
   h('div', { class: 'form-grid' }, field('Account number', f.accountNumber), field('Re-enter account number', f.accountConfirm), field('IFSC', f.ifsc)),
   h('p', { class: 'hint' }, 'We confirm the account with a ₹1 deposit. Only the last four digits are kept on Bazaario; the full number goes to our payout partner.'),
-  h('h4', null, '5. How will orders be shipped?'), radioCards('fulfilment', me.plans.fulfilment, 'fulfilment'),
+  shop ? null : [h('h4', null, '5. How will orders be shipped?'), radioCards('fulfilment', me.plans.fulfilment, 'fulfilment')],
   h('label', { class: 'inline' }, agree, 'I agree to the ', h('a', { href: '#/page/terms', target: '_blank' }, 'seller terms'), ' and confirm my details are correct.'),
   h('p', null, submit));
 }
@@ -179,7 +201,8 @@ async function viewSellerHub(params) {
   const qp = new URLSearchParams(params);
   const tab = HUB_TABS.some(([k]) => k === qp.get('tab')) ? qp.get('tab') : 'overview';
   const head = [h('h1', { class: 'page-title' }, 'Seller Hub'),
-    h('p', { class: 'tagline' }, `${s.displayName} · ${s.laneName} · ${s.fulfilmentName}`)];
+    h('p', { class: 'tagline' }, `${s.displayName} · ${s.laneName} · ${s.fulfilmentName}`,
+      s.lane === 'shop' ? [' · ', h('a', { href: '#/shop' }, 'Open the Shop Partner app')] : null)];
   if (s.status === 'suspended') {
     mount(head, h('div', { class: 'card' }, h('h3', null, 'Account paused'), h('p', null, sellerStatusText.suspended), s.statusNote ? h('p', { class: 'low' }, s.statusNote) : null,
       h('a', { class: 'btn btn-outline', href: '#/help' }, 'Contact seller support')));
@@ -226,10 +249,10 @@ function hubOverview(body, me) {
       h('div', { class: 'card' }, h('h3', null, 'Your plan'),
         h('table', { class: 'details' },
           h('tr', null, h('th', null, 'Selling as'), h('td', null, me.seller.laneName)),
-          h('tr', null, h('th', null, 'Shipping'), h('td', null, me.seller.fulfilmentName, h('div', { class: 'hint' }, me.plans.fulfilment[me.seller.fulfilment].text))),
-          h('tr', null, h('th', null, 'Commission'), h('td', null, me.seller.lane === 'value' ? '0%' : '5-15% of the item price, by category')),
-          h('tr', null, h('th', null, 'Fee per order'), h('td', null, inr(me.plans.fulfilmentFee[me.seller.fulfilment]))),
-          h('tr', null, h('th', null, 'Accept orders within'), h('td', null, `${me.plans.acceptHours} hours`))),
+          h('tr', null, h('th', null, 'Shipping'), h('td', null, me.seller.fulfilmentName, h('div', { class: 'hint' }, me.seller.lane === 'shop' ? 'A Bazaario Express rider collects each order from your shop.' : me.plans.fulfilment[me.seller.fulfilment].text))),
+          h('tr', null, h('th', null, 'Commission'), h('td', null, me.seller.lane === 'value' ? '0%' : me.seller.lane === 'shop' ? `${me.plans.shopCommission}% of the item price` : '5-15% of the item price, by category')),
+          h('tr', null, h('th', null, 'Fee per order'), h('td', null, me.seller.lane === 'shop' ? 'None' : inr(me.plans.fulfilmentFee[me.seller.fulfilment]))),
+          h('tr', null, h('th', null, 'Accept orders within'), h('td', null, me.seller.lane === 'shop' ? `${me.plans.shopAcceptMins} minutes` : `${me.plans.acceptHours} hours`))),
         h('p', null, h('a', { class: 'btn btn-outline', href: '#/seller?tab=add' }, 'Add a product')))));
 }
 
@@ -564,7 +587,8 @@ function hubAccount(body, me) {
 async function studioMarket(tab, body, qp) {
   if (tab === 'sellers') {
     const status = qp.get('status') || '';
-    const { sellers } = await api('GET', '/admin/sellers' + (status ? `?status=${status}` : ''));
+    const lane = qp.get('lane') || '';
+    const { sellers } = await api('GET', `/admin/sellers?status=${status}&lane=${lane}`);
     const act = async (s, action) => {
       let note;
       if (['reject', 'suspend'].includes(action)) {
@@ -573,11 +597,15 @@ async function studioMarket(tab, body, qp) {
       }
       try { await api('PATCH', `/admin/sellers/${s.id}`, { action, note }); toast('Seller updated. They have been emailed.'); route(); } catch (ex) { fail(ex); }
     };
-    const filter = h('select', { style: { width: 'auto' }, onchange: (e) => { location.hash = '#/admin?tab=sellers' + (e.target.value ? `&status=${e.target.value}` : ''); } },
+    const go = (st2, ln) => { location.hash = '#/admin?tab=sellers' + (st2 ? `&status=${st2}` : '') + (ln ? `&lane=${ln}` : ''); };
+    const filter = h('select', { style: { width: 'auto' }, onchange: (e) => go(e.target.value, lane) },
       [['', 'All sellers'], ['pending', 'Waiting for approval'], ['approved', 'Approved'], ['suspended', 'Suspended'], ['rejected', 'Rejected']]
         .map(([v2, l]) => h('option', { value: v2, selected: v2 === status }, l)));
+    const laneFilter = h('select', { style: { width: 'auto' }, 'aria-label': 'Type', onchange: (e) => go(status, e.target.value) },
+      [['', 'Every type'], ['brand', 'Brand stores'], ['standard', 'Standard sellers'], ['value', 'Value sellers'], ['shop', 'Partner shops']]
+        .map(([v2, l]) => h('option', { value: v2, selected: v2 === lane }, l)));
     const nameMatch = (s) => !s.bank_name_at_bank || s.bank_name_at_bank.replace(/\W/g, '') === s.legal_name.toUpperCase().replace(/\W/g, '');
-    fill(body, h('p', null, h('label', { class: 'inline' }, 'Show: ', filter)),
+    fill(body, h('p', null, h('label', { class: 'inline' }, 'Show: ', filter, ' ', laneFilter)),
       sellers.length ? h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['Seller', 'KYC', 'Bank (₹1 check)', 'Ships from', 'Performance', 'Status', ''].map((t) => h('th', null, t))),
         sellers.map((s) => h('tr', null,
@@ -586,7 +614,8 @@ async function studioMarket(tab, body, qp) {
             h('div', { class: 'hint' }, `PAN ${s.pan}`), s.trademark_no ? h('div', { class: 'hint' }, `${s.brand_name} · TM ${s.trademark_no}`) : null),
           h('td', null, s.bank_last4 ? `•••• ${s.bank_last4}` : '—', h('div', { class: 'hint' }, s.bank_ifsc || ''),
             s.bank_name_at_bank ? h('div', { class: nameMatch(s) ? 'hint ok' : 'hint err' }, `Bank name: ${s.bank_name_at_bank}${nameMatch(s) ? '' : ' (does not match)'}`) : null),
-          h('td', null, `${s.pickup_city || ''}, ${s.pickup_state}`, h('div', { class: 'hint' }, { fulfilled: 'Bazaario Fulfilled', pickup: 'Bazaario Pickup', self: 'Self Ship' }[s.fulfilment])),
+          h('td', null, `${s.pickup_city || ''}, ${s.pickup_state}`, h('div', { class: 'hint' }, s.lane === 'shop'
+            ? `Express riders · ${s.radius_km} km · ${s.open_hour}:00 to ${s.close_hour}:00` : { fulfilled: 'Bazaario Fulfilled', pickup: 'Bazaario Pickup', self: 'Self Ship' }[s.fulfilment])),
           h('td', null, s.performance.score === null ? 'New' : `${s.performance.score}/100`, h('div', { class: 'hint' }, `${s.offers} offers · ${s.orders} orders`)),
           h('td', null, cap(s.status), s.status_note ? h('div', { class: 'hint' }, s.status_note) : null),
           h('td', null, h('div', { class: 'line-actions' },
@@ -648,22 +677,34 @@ async function studioMarket(tab, body, qp) {
     const st = await api('GET', '/admin/settlement');
     const run = async () => {
       if (!(await askConfirm('Pay every seller whose return window has closed?', 'Run settlement'))) return;
-      try { const r = await api('POST', '/admin/settlement/run'); toast(r.payouts.length ? `${r.payouts.length} payout(s) sent.` : 'Nothing was due.'); route(); } catch (ex) { fail(ex); }
+      try {
+        const r = await api('POST', '/admin/settlement/run');
+        const n = r.payouts.length + (r.resellerPayouts || []).length;
+        toast(n ? `${n} payout(s) sent.` : 'Nothing was due.'); route();
+      } catch (ex) { fail(ex); }
     };
-    const due = st.due.reduce((s, r) => s + r.net, 0);
+    const due = st.due.reduce((s, r) => s + r.net, 0) + st.resellerDue.reduce((s, r) => s + r.gross, 0);
     fill(body, 
       h('p', { class: 'muted' }, `Sellers are paid ${st.returnWindowDays} days after delivery. Each payout deducts commission, the fee per order, ${st.rates.gstOnFeesPct}% GST on those, GST TCS ${st.rates.tcsPct}% and TDS ${st.rates.tdsPct}%. Have your CA confirm these rates and file TCS (GSTR-8) and TDS returns every month.`),
       h('div', { class: 'stats' }, h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Due now'), h('b', null, inr(due))),
-        h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Sellers due'), h('b', null, st.due.length))),
+        h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Sellers due'), h('b', null, st.due.length)),
+        h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Resellers due'), h('b', null, st.resellerDue.length))),
       h('p', null, h('button', { class: 'btn btn-primary', onclick: run }, 'Run settlement now')),
       st.due.length ? h('div', { class: 'table-wrap' }, h('table', null, h('tr', null, ['Seller', 'Orders', 'Item value', 'Seller gets', 'Status'].map((t) => h('th', null, t))),
         st.due.map((r) => h('tr', null, h('td', null, r.seller), h('td', null, r.orders), h('td', null, inr(r.gross)), h('td', null, inr(r.net)),
           h('td', null, r.status === 'approved' ? 'Ready' : h('span', { class: 'low' }, 'Held: seller suspended')))))) : null,
+      st.resellerDue.length ? [h('h3', { style: { marginTop: '16px' } }, 'Reseller earnings due'), h('div', { class: 'table-wrap' }, h('table', null,
+        h('tr', null, ['Reseller', 'UPI', 'Items', 'Margin earned'].map((t) => h('th', null, t))),
+        st.resellerDue.map((r) => h('tr', null, h('td', null, r.display_name), h('td', null, r.upi_id), h('td', null, r.items), h('td', null, inr(r.gross))))))] : null,
       h('h3', { style: { marginTop: '16px' } }, 'Payouts'),
       st.payouts.length ? h('div', { class: 'table-wrap' }, h('table', null, h('tr', null, ['Date', 'Payout', 'Seller', 'Item value', 'Commission and fees', 'TCS', 'TDS', 'Claims', 'Paid', 'UTR'].map((t) => h('th', null, t))),
         st.payouts.map((p) => h('tr', null, h('td', null, fmtDate(p.created_at)), h('td', null, p.payout_no), h('td', null, p.seller), h('td', null, inr(p.gross)),
           h('td', null, inr(p.commission + p.fees + p.gst_on_fees)), h('td', null, inr(p.tcs)), h('td', null, inr(p.tds)), h('td', null, p.adjustments ? inr(p.adjustments) : '—'),
           h('td', null, h('b', null, inr(p.net))), h('td', { class: 'hint' }, p.utr || '—'))))) : h('p', { class: 'muted' }, 'No payouts yet.'),
+      st.resellerPayouts.length ? [h('h3', { style: { marginTop: '16px' } }, 'Reseller payouts'), h('div', { class: 'table-wrap' }, h('table', null,
+        h('tr', null, ['Date', 'Payout', 'Reseller', 'Earned', 'TDS (194H)', 'Paid', 'UTR'].map((t) => h('th', null, t))),
+        st.resellerPayouts.map((p) => h('tr', null, h('td', null, fmtDate(p.created_at)), h('td', null, p.payout_no), h('td', null, p.reseller), h('td', null, inr(p.gross)),
+          h('td', null, p.tds ? inr(p.tds) : '—'), h('td', null, h('b', null, inr(p.net))), h('td', { class: 'hint' }, p.utr || '—')))))] : null,
       h('h3', { style: { marginTop: '16px' } }, 'Daily money check (last 14 days)'),
       st.reconciliation.length ? h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['Day', 'Paid online', 'Cash collected', 'Refunded', 'Paid to sellers', 'Bazaario earned', 'TCS to deposit', 'TDS to deposit'].map((t) => h('th', null, t))),

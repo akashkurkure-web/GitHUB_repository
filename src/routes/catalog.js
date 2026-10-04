@@ -3,6 +3,8 @@ const express = require('express');
 const db = require('../db');
 const delivery = require('../delivery');
 const market = require('../market');
+const geo = require('../geo');
+const hyper = require('../hyperlocal');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 const router = express.Router();
@@ -115,13 +117,21 @@ router.get('/products/:id', (req, res) => {
   p.specs = JSON.parse(p.specs);
 
   // Every seller's offer on this page, best first (blueprint stage 4: best offer, then other sellers).
-  const ranked = market.rankOffers(market.offersFor(db.get(), id));
+  // Partner shops are not part of this list: they show as "Express near you" for buyers inside their radius.
+  const ranked = market.rankOffers(market.offersFor(db.get(), id).filter(market.national));
   const sellerRow = db.get().prepare('SELECT * FROM sellers WHERE id = ?');
   const offers = ranked.map((o) => ({
     id: o.id, price: o.price, stock: o.stock, dispatchDays: o.dispatch_days, bestBefore: o.best_before, assured: market.isAssured(o, o),
     extraDays: market.extraDays(o), express: o.lane === 'direct' && !!p.express, seller: market.publicSeller(sellerRow.get(o.seller_id)),
   }));
   p.offers = offers;
+  const pin = typeof req.query.pin === 'string' && /^[1-9][0-9]{5}$/.test(req.query.pin) ? req.query.pin : null;
+  const point = pin ? geo.locate(pin) : null;
+  p.nearby = hyper.nearbyOffers(db.get(), id, point).slice(0, 3).map((n) => ({
+    offerId: n.offer.id, price: n.offer.price, stock: n.offer.stock, sellerName: n.offer.seller_name, ok: n.ok,
+    km: Math.round(n.km * 10) / 10, mins: n.mins, promisedAt: n.promisedAt, reason: n.reason,
+  }));
+  p.expressCity = point ? point.city : null;
   p.authentic = market.isAuthenticCategory(p.category);
 
   const dist = db.get().prepare('SELECT rating, COUNT(*) AS n FROM reviews WHERE product_id = ? GROUP BY rating').all(id);

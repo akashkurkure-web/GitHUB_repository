@@ -10,6 +10,7 @@ const notify = require('../notify');
 const { move, event, restock, LABEL, fmtTime } = require('../fulfilment');
 const market = require('../market');
 const routing = require('../routing');
+const hyper = require('../hyperlocal');
 const { invoice } = require('../invoice');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
@@ -102,16 +103,17 @@ router.post('/orders', (req, res) => {
     const insOrder = d.prepare(`INSERT INTO orders (order_no, user_id, status, subtotal, discount, shipping, total, wallet_used,
         coupon_code, payment_method, payment_status, payment_ref, emi_months, delivery_speed, promised_at, address, idempotency_key,
         seller_id, checkout_ref, created_at, updated_at) VALUES (?,?,'placed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    const insItem = d.prepare('INSERT INTO order_items (order_id, product_id, offer_id, title, emoji, price, qty, hsn, gst_rate) VALUES (?,?,?,?,?,?,?,?,?)');
+    const insItem = d.prepare(`INSERT INTO order_items (order_id, product_id, offer_id, title, emoji, price, qty, hsn, gst_rate, share_id, reseller_margin)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
     const sold = d.prepare('UPDATE products SET sold_count = sold_count + ? WHERE id = ?');
     const orders = [];
     packs.forEach((p, i) => {
       const no = orderNo();
       const orderId = Number(insOrder.run(no, req.user.id, subs[i], discounts[i], i === 0 ? fees : 0, totals[i], wallets[i], q.coupon,
-        method, pay.status, pay.ref, pay.emiMonths || null, q.speed, p.promisedAt || q.promisedAt, snapshot, i === 0 ? idem : null,
+        method, pay.status, pay.ref, pay.emiMonths || null, p.speed, p.promisedAt || q.promisedAt, snapshot, i === 0 ? idem : null,
         p.sellerId, checkoutRef, now, now).lastInsertRowid);
       for (const l of p.lines) {
-        insItem.run(orderId, l.product_id, l.offer_id, l.title, l.emoji, l.price, l.qty, l.hsn, l.gst_rate);
+        insItem.run(orderId, l.product_id, l.offer_id, l.title, l.emoji, l.price, l.qty, l.hsn, l.gst_rate, l.share_id, l.reseller_margin);
         // Conditional decrement guards against overselling under concurrency.
         if (!market.moveStock(d, l.offer_id, -l.qty)) throw new HttpError(409, `"${l.title}" just went out of stock.`);
         sold.run(l.qty, l.product_id);
@@ -125,12 +127,14 @@ router.post('/orders', (req, res) => {
         notify.orderUpdate(d, o, 'Thank you! We have received your order and are checking a few details before sending it.');
       } else {
         const seller = d.prepare('SELECT * FROM sellers WHERE id = ?').get(p.sellerId);
-        const reason = q.speed === 'express' ? 'Express from a Bazaario city store'
-          : seller.lane === 'direct' ? 'Bazaario warehouse has stock'
-            : seller.fulfilment === 'fulfilled' ? `${seller.display_name}'s stock in the Bazaario warehouse` : `Best offer from ${seller.display_name}`;
+        const near = seller.lane === 'shop' ? p.lines[0].shop : null;
+        const reason = seller.lane === 'shop' ? `Express from ${seller.display_name}${near && near.km !== null ? `, ${near.km} km away` : ''}`
+          : p.speed === 'express' ? 'Express from a Bazaario city store'
+              : seller.lane === 'direct' ? 'Bazaario warehouse has stock'
+                : seller.fulfilment === 'fulfilled' ? `${seller.display_name}'s stock in the Bazaario warehouse` : `Best offer from ${seller.display_name}`;
         routing.assign(d, orderId, p.sellerId, reason, now);
         const at = p.promisedAt || q.promisedAt;
-        const when = !at ? '' : q.speed === 'express' ? ` by ${fmtTime(at)}` : ` by ${fmtTime(at).split(',').slice(0, 2).join(',')}`;
+        const when = !at ? '' : p.speed === 'express' ? ` by ${fmtTime(at)}` : ` by ${fmtTime(at).split(',').slice(0, 2).join(',')}`;
         const lead = routing.handledByBazaario(seller) ? 'Your order is confirmed' : 'We have received your order';
         notify.orderUpdate(d, o, `Thank you! ${lead} and it will arrive${when}.${packs.length > 1 ? ` It is package ${i + 1} of ${packs.length}.` : ''}`);
       }
@@ -159,6 +163,16 @@ function loadOrder(userId, id, isAdmin = false) {
   const seller = o.seller_id ? db.get().prepare('SELECT * FROM sellers WHERE id = ?').get(o.seller_id) : null;
   o.seller = seller ? market.publicSeller(seller) : null;
   o.packages = o.checkout_ref ? db.get().prepare('SELECT COUNT(*) AS n FROM orders WHERE checkout_ref = ?').get(o.checkout_ref).n : 1;
+  // Express orders: the rider, where they are now and the route for the live map.
+  o.rider = null;
+  if (o.rider_id && o.route) {
+    const r = db.get().prepare('SELECT name, phone FROM riders WHERE id = ?').get(o.rider_id);
+    const route = JSON.parse(o.route);
+    o.rider = { name: r ? r.name : 'Rider', phone: r ? r.phone : '', etaPickup: o.eta_pickup, etaDrop: o.eta_drop, pickedAt: o.rider_picked_at,
+      route, position: hyper.position(o) };
+  }
+  delete o.route;
+  if (!isAdmin) delete o.rider_fee;
   // Buyers see that the order is being checked, not the risk rule that held it.
   if (!isAdmin) o.hold_reason = o.hold_reason ? 'review' : null;
   delete o.idempotency_key;

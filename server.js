@@ -71,16 +71,22 @@ function createApp() {
     emiMinOrder: config.emiMinOrder,
     codMaxOrder: config.codMaxOrder,
     expressCities: Object.values(require('./src/delivery').EXPRESS_CITIES),
+    express: { shopAcceptMins: config.express.shopAcceptMs / 60000, prepMins: config.express.prepMins },
+    reseller: { maxMarginPct: config.reseller.maxMarginPct },
     testMode: { payments: config.paymentProvider === 'test', courier: config.courierProvider === 'test', sms: config.smsProvider === 'test' },
     otpSignIn: config.otpEnabled,
     grievanceOfficer: config.grievanceOfficer,
     companyName: config.companyName,
   }));
   api.use('/auth', require('./src/routes/auth'));
+  // Shared product links open without signing in, so this comes before the routers that require it.
+  api.use('/share', require('./src/routes/reseller').share);
   api.use('/', require('./src/routes/catalog'));
   api.use('/', require('./src/routes/support'));
   api.use('/', require('./src/routes/orders').router);
   api.use('/seller', require('./src/routes/seller'));
+  api.use('/shop', require('./src/routes/shop'));
+  api.use('/reseller', require('./src/routes/reseller').router);
   api.use('/admin', require('./src/routes/admin-market'));
   api.use('/admin', require('./src/routes/admin'));
   api.use('/', require('./src/routes/shopping'));
@@ -118,6 +124,13 @@ if (require.main === module) {
   db.open();
   seed();
   const app = createApp();
+  // Keeps Express moving without anyone looking: missed 2-minute accepts move on, packed orders get riders.
+  setInterval(() => {
+    try {
+      require('./src/routing').sweep();
+      require('./src/hyperlocal').tick(db);
+    } catch (err) { console.error(err); }
+  }, 15_000).unref();
   app.listen(config.port, () => console.log(`${config.storeName} running at http://localhost:${config.port}`));
 }
 

@@ -4,6 +4,8 @@ const db = require('./db');
 const market = require('./market');
 const notify = require('./notify');
 const { move, event } = require('./fulfilment');
+const geo = require('./geo');
+const hyper = require('./hyperlocal');
 const { HttpError } = require('./security');
 
 /**
@@ -13,10 +15,15 @@ const { HttpError } = require('./security');
  *  3. Seller stock goes to the seller with the best offer, who must accept within 24 hours.
  *     If they reject it or the time runs out, the order moves to the next seller who has every item at the
  *     same price or less. If no one can take it, it is cancelled and refunded.
- * Express orders always come from Bazaario's own stock (partner shops join in Phase C).
+ * Express orders come from the partner shop the buyer picked, which must accept within 2 minutes or the order moves
+ * to the next open shop that can reach the buyer, then to a Bazaario city store. Express never falls back to a courier.
  */
 const M = config.market;
+const X = config.express;
 const HOUR = 3600_000;
+const isShop = (s) => s.lane === 'shop';
+/** How long a seller has to accept, in words. */
+const acceptWindow = (s) => (isShop(s) ? `${X.shopAcceptMs / 60000} minutes` : `${M.acceptHours} hours`);
 
 /** Returns why an order should be held for review, or null. */
 function riskHold(d, { userId, method, payable, lines, now = Date.now() }) {
@@ -41,6 +48,11 @@ function sellerContact(d, s) {
 }
 
 function tellSeller(d, s, order, text) {
+  // Partner shops get an SMS: Express orders cannot wait for email.
+  if (isShop(s) && s.phone) {
+    notify.send(d, { userId: s.user_id, orderId: order.id, channel: 'sms', recipient: s.phone, body: `${config.storeName} Shop Partner: ${text} Order ${order.order_no}.` });
+    return;
+  }
   notify.send(d, { userId: s.user_id, orderId: order.id, channel: 'email', recipient: sellerContact(d, s), body: `${config.storeName} Seller Hub: ${text} Order ${order.order_no}.` });
 }
 
@@ -63,9 +75,9 @@ function assign(d, orderId, sellerId, reason, now = Date.now()) {
     move(d, orderId, 'confirmed', { actor: 'system', note: s.lane === 'direct' ? paid : `${paid}. Ships from the Bazaario warehouse.`, quiet: true });
   } else {
     d.prepare("INSERT INTO order_routes (order_id, seller_id, outcome, note, created_at) VALUES (?,?,'waiting',?,?)").run(orderId, sellerId, reason, now);
-    d.prepare('UPDATE orders SET accept_by = ? WHERE id = ?').run(now + M.acceptHours * HOUR, orderId);
+    d.prepare('UPDATE orders SET accept_by = ? WHERE id = ?').run(now + (isShop(s) ? X.shopAcceptMs : M.acceptHours * HOUR), orderId);
     event(d, orderId, 'sent_to_seller', `Sent to ${s.display_name}`);
-    tellSeller(d, s, o, `New order to accept within ${M.acceptHours} hours.`);
+    tellSeller(d, s, o, `New ${isShop(s) ? 'Express ' : ''}order to accept within ${acceptWindow(s)}.`);
   }
 }
 
@@ -100,8 +112,10 @@ function accept(d, orderId, sellerId) {
   if (o.status !== 'placed' || o.hold_reason) throw new HttpError(400, 'This order is not waiting for you to accept it.');
   const now = Date.now();
   decide(d, orderId, sellerId, 'accepted');
-  d.prepare('UPDATE orders SET accept_by = NULL, dispatch_by = ? WHERE id = ?').run(now + dispatchDays(d, orderId) * 24 * HOUR, orderId);
-  const s = d.prepare('SELECT display_name FROM sellers WHERE id = ?').get(sellerId);
+  const s = d.prepare('SELECT display_name, lane FROM sellers WHERE id = ?').get(sellerId);
+  // A partner shop packs an Express order in minutes; other sellers have their dispatch days.
+  const due = isShop(s) ? now + X.prepMins * 60_000 : now + dispatchDays(d, orderId) * 24 * HOUR;
+  d.prepare('UPDATE orders SET accept_by = NULL, dispatch_by = ? WHERE id = ?').run(due, orderId);
   move(d, orderId, 'confirmed', { actor: 'seller', note: `Confirmed by ${s.display_name}` });
   market.refreshScore(d, sellerId);
 }
@@ -110,30 +124,42 @@ function accept(d, orderId, sellerId) {
  * Finds the next seller who has every item of the order in stock at the price the buyer paid or less,
  * and who can deliver to the buyer's state. Sellers who already had this order are skipped.
  */
-function nextSeller(d, o) {
-  const items = d.prepare('SELECT product_id, offer_id, qty, price FROM order_items WHERE order_id = ?').all(o.id);
+function nextSeller(d, o, now = Date.now()) {
+  const items = d.prepare(`SELECT i.product_id, i.offer_id, i.qty, i.price - i.reseller_margin AS price, p.express FROM order_items i
+    JOIN products p ON p.id = i.product_id WHERE i.order_id = ?`).all(o.id);
   const tried = new Set(d.prepare('SELECT seller_id FROM order_routes WHERE order_id = ?').all(o.id).map((r) => r.seller_id));
-  const state = JSON.parse(o.address).state;
+  const address = JSON.parse(o.address);
+  const state = address.state;
+  const point = geo.locate(address.pincode);
+  // Express stays Express: another open partner shop that reaches the buyer, or the Bazaario city store.
+  const fits = (of, it) => (o.delivery_speed === 'express'
+    ? (of.lane === 'direct' && it.express && point) || (of.lane === 'shop' && hyper.shopServes(of, point, now).ok)
+    : of.lane !== 'shop');
   const bySeller = new Map();
   for (const it of items) {
     const offers = market.rankOffers(market.offersFor(d, it.product_id))
-      .filter((of) => !tried.has(of.seller_id) && of.stock >= it.qty && of.price <= it.price && market.deliverable(of, state)
-        && (o.delivery_speed !== 'express' || of.lane === 'direct'));
+      .filter((of) => !tried.has(of.seller_id) && of.stock >= it.qty && of.price <= it.price && market.deliverable(of, state) && fits(of, it));
     for (const of of offers) {
       if (!bySeller.has(of.seller_id)) bySeller.set(of.seller_id, { sellerId: of.seller_id, name: of.seller_name, score: of.score, picks: [], cost: 0 });
       const c = bySeller.get(of.seller_id);
       if (!c.picks.some((p) => p.item === it)) { c.picks.push({ item: it, offer: of }); c.cost += of.price * it.qty; }
     }
   }
+  // For Express the nearest shop wins (a city store counts as far); otherwise the lowest cost.
+  const km = (c) => {
+    if (o.delivery_speed !== 'express') return 0;
+    const s = d.prepare('SELECT * FROM sellers WHERE id = ?').get(c.sellerId);
+    return isShop(s) && point ? geo.distanceKm(hyper.shopPoint(s), point) : 99;
+  };
   return [...bySeller.values()].filter((c) => c.picks.length === items.length)
-    .sort((a, b) => a.cost - b.cost || (b.score ?? 70) - (a.score ?? 70))[0] || null;
+    .sort((a, b) => km(a) - km(b) || a.cost - b.cost || (b.score ?? 70) - (a.score ?? 70))[0] || null;
 }
 
 /** Moves an order away from a seller who could not ship it, or cancels it when no one else can. */
-function reroute(d, orderId, why) {
+function reroute(d, orderId, why, now = Date.now()) {
   const o = d.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   const from = d.prepare('SELECT display_name FROM sellers WHERE id = ?').get(o.seller_id);
-  const next = nextSeller(d, o);
+  const next = nextSeller(d, o, now);
   if (!next) {
     move(d, orderId, 'cancelled', { actor: 'system', allowAny: true, note: `No other seller could take this order (${why}).` });
     return null;
@@ -147,7 +173,7 @@ function reroute(d, orderId, why) {
   }
   for (const pid of touched) market.syncProduct(d, pid);
   event(d, orderId, 'rerouted', `Moved from ${from.display_name} to ${next.name}`);
-  assign(d, orderId, next.sellerId, `Moved from ${from.display_name}: ${why}`);
+  assign(d, orderId, next.sellerId, `Moved from ${from.display_name}: ${why}`, now);
   return next.sellerId;
 }
 
@@ -180,8 +206,9 @@ function sweep(now = Date.now()) {
     db.tx((t) => {
       const cur = t.prepare('SELECT status, accept_by FROM orders WHERE id = ?').get(o.id);
       if (cur.status !== 'placed' || !cur.accept_by || cur.accept_by >= now) return;
-      decide(t, o.id, o.seller_id, 'expired', `Not confirmed within ${M.acceptHours} hours`);
-      reroute(t, o.id, `not confirmed within ${M.acceptHours} hours`);
+      const window = acceptWindow(t.prepare('SELECT lane FROM sellers WHERE id = ?').get(o.seller_id));
+      decide(t, o.id, o.seller_id, 'expired', `Not confirmed within ${window}`);
+      reroute(t, o.id, `not confirmed within ${window}`, now);
       market.refreshScore(t, o.seller_id);
     });
   }

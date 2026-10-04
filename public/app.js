@@ -56,9 +56,9 @@ const STATUS_LABEL = {
   delivery_failed: 'Delivery attempt failed', delivered: 'Delivered', rto: 'Returned to Bazaario', cancelled: 'Cancelled',
   return_requested: 'Return requested', returned: 'Returned and refunded',
   reattempt_requested: 'New delivery time requested', return_pickup: 'Return pickup scheduled', return_rejected: 'Return not accepted',
-  sent_to_seller: 'Sent to the seller', on_hold: 'Being checked', rerouted: 'Moved to another seller',
+  sent_to_seller: 'Sent to the seller', on_hold: 'Being checked', rerouted: 'Moved to another seller', rider_assigned: 'Rider assigned',
 };
-const LANE_LABEL = { direct: 'Bazaario Direct', brand: 'Brand store', standard: 'Standard seller', value: 'Value seller' };
+const LANE_LABEL = { direct: 'Bazaario Direct', brand: 'Brand store', standard: 'Standard seller', value: 'Value seller', shop: 'Partner shop' };
 /** "Excellent" etc. from a seller performance score; new sellers have none yet. */
 const scoreText = (score) => (score === null || score === undefined ? 'New seller' : score >= 85 ? `Excellent seller (${score}/100)` : score >= 70 ? `Good seller (${score}/100)` : `Seller score ${score}/100`);
 const PAY_LABEL = { upi: 'UPI', card: 'Card', emi: 'Card EMI', cod: 'Cash on Delivery', wallet: 'Wallet' };
@@ -192,18 +192,20 @@ function askConfirm(message, yesLabel = 'Yes') {
 
 // ---------------- Cart actions ----------------
 /** Adds to the bag from the best offer, or from one seller's offer when `offerId` is given ("Other sellers"). */
-async function addToCart(product, qty = 1, buyNow = false, offerId = null) {
+async function addToCart(product, qty = 1, buyNow = false, offerId = null, shareCode = null) {
   try {
     if (state.user) {
-      await api('POST', '/cart', { productId: product.id, qty, offerId: offerId || undefined });
+      await api('POST', '/cart', { productId: product.id, qty, offerId: offerId || undefined, shareCode: shareCode || undefined });
     } else {
       const items = guestCart();
       const ex = items.find((i) => i.productId === product.id);
       const max = Math.min(product.stock, state.config.maxQtyPerItem || 10);
       // Picking another seller replaces the line, as it does for signed-in shoppers.
-      if (ex && (ex.offerId || null) === (offerId || null)) ex.qty = Math.min(ex.qty + qty, max);
-      else if (ex) Object.assign(ex, { qty: Math.min(qty, max), offerId: offerId || undefined });
-      else items.unshift({ productId: product.id, qty: Math.min(qty, max), offerId: offerId || undefined });
+      if (ex && (ex.offerId || null) === (offerId || null)) Object.assign(ex, { qty: Math.min(ex.qty + qty, max), shareCode: shareCode || ex.shareCode });
+      else if (ex) Object.assign(ex, { qty: Math.min(qty, max), offerId: offerId || undefined, shareCode: shareCode || undefined });
+      else items.unshift({ productId: product.id, qty: Math.min(qty, max), offerId: offerId || undefined, shareCode: shareCode || undefined });
+      // A shared link's price and reseller are kept so the signed-out bag shows what the buyer will pay.
+      if (shareCode) Object.assign(items.find((i) => i.productId === product.id), { sharePrice: product.price, resellerName: product.resellerName });
       setGuestCart(items);
     }
     await updateCartCount();
@@ -386,7 +388,8 @@ async function viewSearch(params) {
 }
 
 async function viewProduct(id) {
-  const data = await api('GET', `/products/${encodeURIComponent(id)}`);
+  const pinNow = store.get('pin', '');
+  const data = await api('GET', `/products/${encodeURIComponent(id)}${/^[1-9]\d{5}$/.test(pinNow) ? `?pin=${pinNow}` : ''}`);
   const p = data.product;
   pushRecent(p.id);
   document.title = `${p.title} · Bazaario`;
@@ -396,9 +399,15 @@ async function viewProduct(id) {
   const pin = store.get('pin', '');
   const pinIn = h('input', { value: pin, maxLength: 6, placeholder: 'Enter PIN code', inputMode: 'numeric', 'aria-label': 'Delivery PIN code' });
   const pinOut = h('div', { class: 'hint' });
+  // Partner shops near the buyer's PIN code that can bring this item by Express (express.js).
+  const nearBox = h('div');
+  const paintNear = (list) => fill(nearBox, expressNear(p, list || []));
+  paintNear(p.nearby);
   const checkPin = async () => {
     if (!/^[1-9]\d{5}$/.test(pinIn.value)) { pinOut.className = 'err'; pinOut.textContent = 'Please enter a valid 6-digit PIN code.'; return; }
+    const changed = pinIn.value !== store.get('pin', '');
     store.set('pin', pinIn.value); renderHeader();
+    if (changed) api('GET', `/products/${p.id}?pin=${pinIn.value}`).then((d) => paintNear(d.product.nearby)).catch(() => {});
     try {
       const d = await api('GET', `/delivery?pincode=${pinIn.value}&products=${p.id}`);
       pinOut.className = 'delivery-opts';
@@ -488,6 +497,7 @@ async function viewProduct(id) {
             h('span', { class: 'muted' }, p.express ? `Express delivery in ${(state.config.expressCities || []).length} cities` : `Free delivery by ${deliveryDate(false)}`)),
           h('div', { class: 'pin-check' }, pinIn, h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: checkPin }, 'Check')),
           pinOut,
+          nearBox,
           p.stock > 0 ? h('div', { class: 'buy-actions' },
             h('label', { class: 'qty' }, h('span', { class: 'sr-only' }, 'Quantity'), qtySel),
             h('button', { class: 'btn btn-primary', onclick: () => addToCart(p, Number(qtySel.value)) }, 'Add to bag'),
@@ -537,7 +547,8 @@ function sellerDetails(s) {
 // ---------- Cart ----------
 async function viewCart() {
   let data;
-  if (state.user) data = await api('GET', '/cart');
+  const pin = store.get('pin', '');
+  if (state.user) data = await api('GET', '/cart' + (/^[1-9]\d{5}$/.test(pin) ? `?pin=${pin}` : ''));
   else {
     const items = guestCart();
     const prods = await Promise.all(items.map((i) => api('GET', `/products/${i.productId}`).then((d) => d.product).catch(() => null)));
@@ -545,8 +556,9 @@ async function viewCart() {
       const p = prods[k];
       if (!p) return null;
       const o = (i.offerId && p.offers.find((x) => x.id === i.offerId)) || p.offers[0];
-      return { product_id: i.productId, ...p, qty: Math.min(i.qty, o ? o.stock : p.stock), price: o ? o.price : p.price, stock: o ? o.stock : 0,
-        seller_name: o ? o.seller.name : '' };
+      const shared = i.shareCode && i.sharePrice && !i.offerId;
+      return { product_id: i.productId, ...p, qty: Math.min(i.qty, o ? o.stock : p.stock), price: shared ? i.sharePrice : o ? o.price : p.price, stock: o ? o.stock : 0,
+        seller_name: o ? o.seller.name : '', reseller_name: shared ? i.resellerName : '', nearby: null };
     }).filter(Boolean);
     const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
     data = { lines, saved: [], subtotal, count: lines.reduce((s, l) => s + l.qty, 0), freeShippingThreshold: state.config.freeShippingThreshold };
@@ -572,6 +584,9 @@ async function viewCart() {
       h('a', { class: 'line-title', href: `#/p/${l.product_id}` }, l.title),
       l.stock > 0 ? h('div', { class: l.stock < 10 ? 'low' : 'ok' }, l.stock < 10 ? `Only ${l.stock} left` : 'In stock') : h('div', { class: 'err' }, 'Out of stock'),
       l.seller_name ? h('div', { class: 'muted small' }, `Sold by ${l.seller_name}`) : null,
+      l.reseller_name ? h('div', { class: 'muted small' }, `Shared by ${l.reseller_name}`) : null,
+      saved ? null : cartExpress(l, update),
+      l.blocked ? h('div', { class: 'err small' }, l.blocked) : null,
       l.note ? h('div', { class: 'low small' }, l.note) : null,
       h('div', { class: 'muted small' }, 'Free delivery on orders above ₹499'),
       h('div', { class: 'line-actions' },
@@ -713,8 +728,11 @@ async function viewCheckout() {
       q.speeds.map((o) => h('label', { class: 'addr-opt' + (o.speed === q.speed ? ' sel' : '') },
         h('input', { type: 'radio', name: 'speed', checked: o.speed === q.speed, onchange: () => { sel.speed = o.speed; refreshQuote(); } }),
         h('span', null, h('b', null, o.speed === 'express' ? 'Express' : 'Standard'), ` · ${cap(promiseText(o))} · ${fee(o)}`,
-          o.speed === 'express' ? h('div', { class: 'hint' }, 'From a Bazaario partner store near you.') : null))),
-      q.speeds.some((o) => o.speed === 'express') ? null
+          o.speed === 'express' ? h('div', { class: 'hint' }, q.shopPackages ? 'From a partner shop or Bazaario city store near you.' : 'From a Bazaario city store near you.') : null))),
+      q.shopPackages ? h('p', { class: 'hint' }, q.shopPackages === q.packages.length
+        ? 'Items from partner shops near you always come by Express.'
+        : 'Items from partner shops near you always come by Express. Your choice here is for the other packages.') : null,
+      q.speeds.some((o) => o.speed === 'express') || q.shopPackages ? null
         : h('p', { class: 'hint' }, `Express delivery in under 90 minutes is available in ${(state.config.expressCities || []).join(', ')} for items marked Express.`));
   };
 
@@ -752,7 +770,7 @@ async function viewCheckout() {
           q.discount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.discount))] : null,
           q.walletApplied ? [h('dt', null, 'Order total:'), h('dd', null, inr(q.total)), h('dt', null, 'From wallet:'), h('dd', { class: 'ok' }, '-' + inr(q.walletApplied))] : null,
           h('dt', { class: 'total' }, 'To pay'), h('dd', { class: 'total' }, inr(q.payable))),
-        q.promisedAt ? h('p', { class: 'ok small' }, `Arrives ${promiseText({ speed: q.speed, promisedAt: q.promisedAt })}`) : null,
+        q.promisedAt && q.packages.length === 1 ? h('p', { class: 'ok small' }, `Arrives ${promiseText({ speed: q.packages[0].speed || q.speed, promisedAt: q.packages[0].promisedAt || q.promisedAt })}`) : null,
         q.savings > 0 ? h('p', { class: 'savings' }, `You save ${inr(q.savings)} on this order`) : null);
       return true;
     } catch (e) {
@@ -772,7 +790,8 @@ async function viewCheckout() {
         q.packages.length > 1 || pk.lane !== 'direct' ? h('div', { class: 'package-head' },
           h('b', null, q.packages.length > 1 ? `Package ${i + 1} of ${q.packages.length}` : 'Your package'),
           h('span', { class: 'muted' }, `Sold by ${pk.sellerName}`),
-          pk.promisedAt ? h('span', { class: 'ok' }, `Arrives ${promiseText({ speed: q.speed, promisedAt: pk.promisedAt })}`) : null) : null,
+          pk.speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : null,
+          pk.promisedAt ? h('span', { class: 'ok' }, `Arrives ${promiseText({ speed: pk.speed || q.speed, promisedAt: pk.promisedAt })}`) : null) : null,
         pk.lines.map((id) => byId.get(id)).map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
           h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
             l.express ? h('div', { class: 'hint' }, 'Express item') : null, l.blocked ? h('div', { class: 'err small' }, l.blocked) : null))))));
@@ -885,7 +904,7 @@ async function viewOrder(id, params) {
   const { order: o } = await api('GET', `/orders/${encodeURIComponent(id)}`);
   const express = o.delivery_speed === 'express';
   const steps = express ? ['confirmed', 'packed', 'shipped', 'delivered'] : ['confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
-  const stepLabel = (s) => (express && s === 'shipped' ? 'Rider on the way' : STATUS_LABEL[s]);
+  const stepLabel = (s) => (express && s === 'shipped' ? 'Picked up' : express && s === 'packed' ? 'Packed, rider coming' : STATUS_LABEL[s]);
   const at = { placed: 0, delivery_failed: steps.indexOf('out_for_delivery'), return_requested: steps.length - 1, returned: steps.length - 1 };
   const reached = o.status in at ? at[o.status] : steps.indexOf(o.status);
   const done = async (path, body, msg) => {
@@ -943,6 +962,7 @@ async function viewOrder(id, params) {
       o.awb ? h('p', { class: 'hint' }, `${o.courier} · Tracking number ${o.awb}`) : null,
       reached >= 0 && !['cancelled', 'rto'].includes(o.status) ? h('div', { class: 'tracker' }, steps.map((s, i) => h('div', { class: i <= reached ? 'done' : '' }, stepLabel(s)))) : null,
       timeline(o.events)),
+    o.rider ? liveTracking(o) : null,
     o.status === 'delivery_failed' ? ndr() : null,
     o.return ? h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', null, 'Your return'),
       h('p', { class: o.return.status === 'rejected' ? 'low' : 'ok' }, RETURN_STATUS[o.return.status]),
@@ -1111,6 +1131,8 @@ async function viewAccount() {
       tile('#/help', 'Help centre', 'Questions and your requests'),
       tile('#/s?deals=1', 'Deals', 'Limited-time offers'),
       tile('#/seller', 'Seller Hub', 'Sell on Bazaario: listings, orders and payouts'),
+      tile('#/shop', 'Shop Partner', 'Your neighbourhood shop on Bazaario Express'),
+      tile('#/resell', 'Resell and earn', 'Share products on WhatsApp with your own margin'),
       state.user.role === 'admin' ? tile('#/admin', 'Bazaario Studio', 'Products, orders, customers, coupons') : null),
     h('p', null, h('button', { class: 'btn btn-outline', onclick: logout }, 'Sign out')));
 }
@@ -1167,6 +1189,7 @@ async function viewAdmin(params) {
   const tab = qp.get('tab') || 'dashboard';
   const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['returns', 'Returns'], ['helpdesk', 'Help desk'], ['messages', 'Messages'],
     ['products', 'Products'], ['sellers', 'Sellers'], ['qc', 'Catalog check'], ['claims', 'Claims'], ['settlement', 'Settlement'],
+    ['express', 'Express'], ['riders', 'Riders'], ['resellers', 'Resellers'],
     ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
     .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
@@ -1339,6 +1362,8 @@ async function viewAdmin(params) {
   }
 
   if (['sellers', 'qc', 'claims', 'settlement'].includes(tab)) await studioMarket(tab, body, qp);
+  if (['express', 'riders'].includes(tab)) await studioExpress(tab, body);
+  if (tab === 'resellers') await studioResellers(body);
 
   if (tab === 'customers') {
     const { users } = await api('GET', '/admin/users');
@@ -1643,6 +1668,10 @@ async function route() {
     sell: () => viewSell(),
     seller: () => viewSellerHub(query),
     doc: () => viewDocument(parts[1], parts[2], query),
+    partner: () => viewPartner(),
+    shop: () => viewShop(query),
+    resell: () => viewResell(query),
+    r: () => viewShare(parts[1]),
   };
   const view = routes[parts[0] || ''];
   if (!view) { viewPage('missing'); return; }

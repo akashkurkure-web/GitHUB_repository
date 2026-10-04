@@ -102,9 +102,16 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
       // The courier was booked when the seller packed the order; this is the pickup scan.
       text = `Shipped with ${set.courier}, tracking number ${set.awb}.`;
     } else if (o.delivery_speed === 'express') {
-      set.courier = 'Bazaario Express rider';
-      set.awb = `EXP${crypto.randomInt(1e7, 1e8)}`;
+      set.courier = courier || 'Bazaario Express rider';
+      set.awb = awb || `EXP${crypto.randomInt(1e7, 1e8)}`;
       text = 'A rider has picked up your Express order.';
+      // Studio marked the pickup by hand: the rider's drop time starts now.
+      if (o.rider_id && !o.rider_picked_at) {
+        const route = JSON.parse(o.route);
+        const hyper = require('./hyperlocal');
+        d.prepare('UPDATE orders SET rider_picked_at = ?, eta_drop = ? WHERE id = ?')
+          .run(now, now + (config.express.handoverMins + hyper.travelMins(route.km)) * 60_000, orderId);
+      }
     } else if (courier && awb) {
       // Self Ship sellers book their own courier and enter its tracking number.
       set.courier = courier;
@@ -138,6 +145,15 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
     d.prepare("UPDATE order_routes SET decided_at = ?, note = 'Order closed before the seller answered' WHERE order_id = ? AND outcome = 'waiting'")
       .run(now, orderId);
     eventNote = [eventNote, r.note].filter(Boolean).join(' ');
+    // Partner shops are paid the day after delivery, so a later return is taken back from their next payout.
+    if (next === 'returned' && o.payout_id) {
+      const paid = d.prepare('SELECT net FROM payout_lines WHERE payout_id = ? AND order_id = ? AND claim_id IS NULL').get(o.payout_id, orderId);
+      if (paid && !d.prepare('SELECT 1 FROM claims WHERE order_id = ?').get(orderId)) {
+        d.prepare(`INSERT INTO claims (order_id, seller_id, reason, note, status, amount, decision_note, created_at, updated_at)
+          VALUES (?,?,'Return after payout','The buyer returned this order after it was paid out.','approved',?,'Taken back from the next payout',?,?)`)
+          .run(orderId, o.seller_id, -paid.net, now, now);
+      }
+    }
     text = next === 'cancelled' ? 'Your order is cancelled.' : next === 'rto' ? 'Your order could not be delivered and is coming back to us.' : 'Your return is complete.';
     if (r.note) text += ' ' + r.note;
   }
@@ -146,6 +162,8 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
     .run(set.status, set.payment_status, set.courier, set.awb, set.delivered_at, set.shipped_at, now, orderId);
   event(d, orderId, next, eventNote);
   if (text && !quiet) notify.orderUpdate(d, o, text);
+  // A packed Express order gets the nearest free rider straight away.
+  if (next === 'packed' && o.delivery_speed === 'express') require('./hyperlocal').dispatch(d, orderId, now);
   // Shipping, delivery and cancellations feed the seller's performance score.
   if (o.seller_id && ['shipped', 'delivered', 'cancelled', 'returned'].includes(next)) market.refreshScore(d, o.seller_id);
   return { ...o, ...set };

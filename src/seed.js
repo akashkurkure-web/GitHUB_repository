@@ -5,6 +5,7 @@ const config = require('./config');
 const { hashPassword } = require('./security');
 const market = require('./market');
 const kyc = require('./kyc');
+const geo = require('./geo');
 
 const CATEGORIES = [
   ['mobiles', 'Mobiles', '📱'],
@@ -141,6 +142,41 @@ function seedSellers(d, now) {
   }
 }
 
+// Bazaario Express (blueprint stages 6 to 8): riders in every Express city and one demo partner shop in Pune.
+const RIDER_NAMES = ['Ravi', 'Imran', 'Suresh', 'Anil', 'Deepak', 'Farhan', 'Kiran', 'Manoj', 'Vikram', 'Salim', 'Ajay', 'Prakash'];
+const DEMO_SHOP = { code: 'S0004', name: 'Kothrud Fresh Mart', legal: 'Sunil Jadhav', pan: 'BQZPJ6621L', city: 'Pune', state: 'Maharashtra',
+  pincode: '411038', line1: 'Shop 4, Karve Road, Kothrud', radius: 5, open: 7, close: 23,
+  offers: [['Premium Basmati Rice 5kg', 659, 25], ['Cold Pressed Groundnut Oil 1L', 285, 30], ['Assam Tea 1kg', 455, 20],
+    ['Stainless Steel Water Bottle 1L (Pack of 2)', 559, 12], ['LED Desk Lamp with 3 Brightness Modes', 919, 6]] };
+
+function seedExpress(d, now) {
+  if (!d.prepare('SELECT 1 FROM riders LIMIT 1').get()) {
+    const ins = d.prepare('INSERT INTO riders (name, phone, city, lat, lng, active, created_at) VALUES (?,?,?,?,?,1,?)');
+    let n = 0;
+    for (const [prefix, c] of Object.entries(geo.CITY_CENTRES)) {
+      for (let k = 0; k < 3; k += 1) {
+        // Riders wait around the city, 1 to 4 km from the centre.
+        const at = geo.offset(c, 1 + k * 1.5, (Number(prefix) * 7 + k * 120) % 360);
+        ins.run(RIDER_NAMES[n % RIDER_NAMES.length], `98${String(20000000 + n * 7919).slice(0, 8)}`, c.city, at.lat, at.lng, now);
+        n += 1;
+      }
+    }
+  }
+  if (d.prepare("SELECT 1 FROM sellers WHERE lane = 'shop' LIMIT 1").get() || d.prepare('SELECT 1 FROM sellers WHERE code = ?').get(DEMO_SHOP.code)) return;
+  const s = DEMO_SHOP;
+  const at = geo.locate(s.pincode, 'demo-shop');
+  const id = Number(d.prepare(`INSERT INTO sellers (code, lane, display_name, legal_name, pan, bank_ifsc, bank_last4, bank_name_at_bank, bank_ref,
+    pickup_line1, pickup_city, pickup_state, pickup_pincode, fulfilment, status, lat, lng, radius_km, open_hour, close_hour, accepting,
+    created_at, approved_at, updated_at) VALUES (?,'shop',?,?,?,'HDFC0001234','4321',?,?,?,?,?,?,'pickup','approved',?,?,?,?,?,1,?,?,?)`)
+    .run(s.code, s.name, s.legal, s.pan, s.legal.toUpperCase(), `BENE-DEMO${s.code}`, s.line1, s.city, s.state, s.pincode,
+      at.lat, at.lng, s.radius, s.open, s.close, now, now, now).lastInsertRowid);
+  const insOffer = d.prepare('INSERT INTO offers (product_id, seller_id, price, stock, dispatch_days, active, created_at, updated_at) VALUES (?,?,?,?,1,1,?,?)');
+  for (const [title, price, stock] of s.offers) {
+    const p = d.prepare('SELECT id FROM products WHERE title = ?').get(title);
+    if (p) insOffer.run(p.id, id, price * 100, stock, now, now);
+  }
+}
+
 const pictureOf = (i) => (PICTURES[i] ? `img/products/${PICTURES[i]}.svg` : '');
 
 function seed({ reset = false, log = console.log } = {}) {
@@ -150,13 +186,16 @@ function seed({ reset = false, log = console.log } = {}) {
             DELETE FROM order_events; DELETE FROM notifications; DELETE FROM wallet_ledger; DELETE FROM ticket_messages; DELETE FROM tickets;
             DELETE FROM order_items; DELETE FROM orders; DELETE FROM reviews; DELETE FROM cart_items; DELETE FROM wishlist; DELETE FROM offers;
             DELETE FROM addresses; DELETE FROM sessions; DELETE FROM products; DELETE FROM categories; DELETE FROM coupons; DELETE FROM sellers;
-            DELETE FROM otp_codes; DELETE FROM audit_log; DELETE FROM users;`);
+            DELETE FROM otp_codes; DELETE FROM audit_log; DELETE FROM rider_payouts; DELETE FROM riders; DELETE FROM reseller_payouts;
+            DELETE FROM reseller_shares; DELETE FROM resellers; DELETE FROM users;`);
   }
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
   if (already > 0) {
     // Older stores were seeded before pictures existed: fill in only products that still have none.
     const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
     PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    // Stores from before Express riders and partner shops get them now.
+    db.tx((t) => seedExpress(t, Date.now()));
     return;
   }
 
@@ -178,6 +217,7 @@ function seed({ reset = false, log = console.log } = {}) {
 
     market.backfill(d);
     seedSellers(d, now);
+    seedExpress(d, now);
 
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);

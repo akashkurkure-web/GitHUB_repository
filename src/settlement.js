@@ -17,7 +17,8 @@ const pctOf = (amount, pct) => Math.round((amount * pct) / 100);
 
 /** What one delivered order earns its seller. */
 function breakdown(d, order, seller) {
-  const items = d.prepare(`SELECT i.price, i.qty, i.gst_rate, c.slug FROM order_items i JOIN products p ON p.id = i.product_id
+  // A reseller's margin is part of what the buyer paid but goes to the reseller, not the seller.
+  const items = d.prepare(`SELECT i.price - i.reseller_margin AS price, i.qty, i.gst_rate, c.slug FROM order_items i JOIN products p ON p.id = i.product_id
     JOIN categories c ON c.id = p.category_id WHERE i.order_id = ?`).all(order.id);
   let gross = 0;
   let commission = 0;
@@ -28,7 +29,8 @@ function breakdown(d, order, seller) {
     commission += pctOf(amount, market.commissionPct(seller.lane, it.slug));
     taxable += Math.round((amount * 100) / (100 + it.gst_rate));
   }
-  const fees = M.fulfilmentFee[seller.fulfilment] || 0;
+  // Partner shops pay commission only: the Express rider is paid by Bazaario from the buyer's Express fee.
+  const fees = seller.lane === 'shop' ? 0 : M.fulfilmentFee[seller.fulfilment] || 0;
   const gstOnFees = pctOf(commission + fees, M.gstOnFeesPct);
   // TCS applies to sellers registered for GST; sellers with only an enrolment ID are not.
   const tcs = seller.gstin ? pctOf(taxable, M.tcsPct) : 0;
@@ -36,13 +38,16 @@ function breakdown(d, order, seller) {
   return { gross, commission, fees, gstOnFees, tcs, tds, net: gross - commission - fees - gstOnFees - tcs - tds };
 }
 
-const releaseAt = (o) => o.delivered_at + config.returnWindowDays * DAY;
+// Sellers are paid once the return window closes; partner shops are paid the day after delivery.
+const holdDays = (lane) => (lane === 'shop' ? config.express.shopPayoutDays : config.returnWindowDays);
+const releaseAt = (o, lane) => o.delivered_at + holdDays(lane) * DAY;
 
-/** Delivered seller orders whose return window has closed and that have not been paid yet. */
+/** Delivered seller orders that are past their hold and have not been paid yet. */
 function eligible(d, now, sellerId) {
   return d.prepare(`SELECT o.* FROM orders o JOIN sellers s ON s.id = o.seller_id
-    WHERE s.lane != 'direct' AND o.status = 'delivered' AND o.payout_id IS NULL AND o.delivered_at <= ? ${sellerId ? 'AND o.seller_id = ?' : ''}
-    ORDER BY o.delivered_at`).all(now - config.returnWindowDays * DAY, ...(sellerId ? [sellerId] : []));
+    WHERE s.lane != 'direct' AND o.status = 'delivered' AND o.payout_id IS NULL
+      AND o.delivered_at <= ? - (CASE WHEN s.lane = 'shop' THEN ? ELSE ? END) ${sellerId ? 'AND o.seller_id = ?' : ''}
+    ORDER BY o.delivered_at`).all(now, config.express.shopPayoutDays * DAY, config.returnWindowDays * DAY, ...(sellerId ? [sellerId] : []));
 }
 
 /** Money on its way to a seller: delivered orders still inside the return window, and approved claims. */
@@ -50,8 +55,8 @@ function upcoming(d, sellerId, now = Date.now()) {
   const seller = d.prepare('SELECT * FROM sellers WHERE id = ?').get(sellerId);
   const orders = d.prepare(`SELECT * FROM orders WHERE seller_id = ? AND payout_id IS NULL AND status IN ('delivered','return_requested')
     ORDER BY delivered_at`).all(sellerId);
-  const lines = orders.map((o) => ({ orderId: o.id, orderNo: o.order_no, deliveredAt: o.delivered_at, releaseAt: releaseAt(o),
-    ready: o.status === 'delivered' && releaseAt(o) <= now, onHold: o.status === 'return_requested', ...breakdown(d, o, seller) }));
+  const lines = orders.map((o) => ({ orderId: o.id, orderNo: o.order_no, deliveredAt: o.delivered_at, releaseAt: releaseAt(o, seller.lane),
+    ready: o.status === 'delivered' && releaseAt(o, seller.lane) <= now, onHold: o.status === 'return_requested', ...breakdown(d, o, seller) }));
   const claims = d.prepare("SELECT c.id, c.amount, c.reason, o.order_no FROM claims c JOIN orders o ON o.id = c.order_id WHERE c.seller_id = ? AND c.status = 'approved' AND c.payout_id IS NULL")
     .all(sellerId);
   return { lines, claims, net: lines.reduce((s, l) => s + l.net, 0) + claims.reduce((s, c) => s + c.amount, 0) };
