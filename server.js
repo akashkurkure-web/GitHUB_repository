@@ -73,7 +73,15 @@ function createApp() {
   app.use('/api', api);
   // Self-hosted web fonts (Fraunces + Manrope), so the CSP can stay 'self'-only.
   app.use('/fonts', express.static(path.join(__dirname, 'node_modules', '@fontsource'), { maxAge: '30d', immutable: true }));
-  app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html', maxAge: config.isProd ? '1h' : 0 }));
+  app.use(express.static(path.join(__dirname, 'public'), {
+    index: 'index.html',
+    maxAge: config.isProd ? '1h' : 0,
+    setHeaders: (res, file) => {
+      // The service worker and app manifest must be re-checked on every visit so installed apps pick up updates.
+      if (file.endsWith('sw.js') || file.endsWith('.webmanifest')) res.setHeader('Cache-Control', 'no-cache');
+      if (file.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
+    },
+  }));
   // SPA fallback (hash routing, so only "/" really needs it).
   app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

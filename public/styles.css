@@ -123,6 +123,9 @@ main { max-width: 1280px; margin: 0 auto; padding: 12px 20px 32px; min-height: 6
 .empty { text-align: center; padding: 32px 16px; }
 .small-empty { padding: 12px; background: var(--paper); border-radius: var(--r-card); }
 .prose { max-width: 760px; margin: 0 auto; }
+.app-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.app-steps ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.6; }
+.prose > .card .btn { margin-top: 12px; }
 
 /* ---------- Home ---------- */
 .hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 24px 28px; }
@@ -381,7 +384,7 @@ dialog::backdrop { background: rgba(31, 29, 26, .45); }
   .line { grid-template-columns: 72px 1fr; gap: 10px; }
   .line-price { grid-column: 2; text-align: left; }
   .line-price .pricing { align-items: flex-start; }
-  .form-grid { grid-template-columns: 1fr; }
+  .form-grid, .app-steps { grid-template-columns: 1fr; }
   .stepper li { font-size: 11px; gap: 4px; }
   .stepper li:not(:last-child)::after { margin: 0 4px; }
   .footer-cols { grid-template-columns: 1fr 1fr; }
