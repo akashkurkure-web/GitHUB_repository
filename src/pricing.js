@@ -6,7 +6,7 @@ const { HttpError } = require('./security');
 /** Server-side source of truth for cart totals. Client-sent prices are never trusted. */
 function cartLines(userId) {
   return db.get().prepare(
-    `SELECT c.product_id, c.qty, p.title, p.price, p.mrp, p.stock, p.emoji, p.color, p.active, p.express
+    `SELECT c.product_id, c.qty, p.title, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.active, p.express
        FROM cart_items c JOIN products p ON p.id = c.product_id
       WHERE c.user_id = ? AND c.saved_for_later = 0 ORDER BY c.added_at DESC`
   ).all(userId);

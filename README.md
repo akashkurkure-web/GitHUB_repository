@@ -83,7 +83,7 @@ bump `VERSION` in `public/sw.js` so installed apps pick up the change immediatel
 | **Checkout** | Address book with Indian states & PIN validation, UPI / Card (Luhn + expiry) / Cash on Delivery (₹50,000 cap), coupons, free delivery over ₹499, savings summary, idempotent "Place order" (no double orders) |
 | **Orders** | Order history, details, tracking stepper (Placed → Packed → Shipped → Delivered), cancel (auto-refund + restock), 10-day return window, Buy it again |
 | **Account** | Profile, change password (signs out other devices), addresses, wish list |
-| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, low stock), order fulfilment workflow, product CRUD, customers, coupons, security audit log |
+| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, low stock), order fulfilment workflow, product CRUD with photo upload, customers, coupons, security audit log |
 
 ## 2. Security controls
 
@@ -230,4 +230,4 @@ tests/api.test.js      Integration & security tests (npm test)
 | Look & feel | Follow [`DESIGN.md`](DESIGN.md); tokens are CSS variables at the top of `public/styles.css` |
 | Free-delivery threshold, shipping fee, COD limit, return window | `src/config.js` |
 | Products, categories, coupons | Bazaario Studio UI (or `src/seed.js` for the initial catalog) |
-| Real product photos | Add an `image_url` column, put images in `public/img/`, render an `<img>` in `productCard()`. Keep images same-origin or add your CDN to `img-src` in the CSP |
+| Real product photos | Bazaario Studio → **Products** → **Edit** → **Upload photo** (or paste an `https://` image link) → **Save product**. Uploads are resized in the browser to 1000px and stored in `data/uploads/` (set `UPLOAD_DIR` to move them; on Render keep them on the same persistent disk as the database) |

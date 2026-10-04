@@ -22,7 +22,8 @@ function createApp() {
         'default-src': ["'self'"],
         'script-src': ["'self'"],
         'style-src': ["'self'"],
-        'img-src': ["'self'", 'data:'],
+        // https: lets a product photo be a link to an image hosted elsewhere (e.g. a CDN).
+        'img-src': ["'self'", 'data:', 'https:'],
         'connect-src': ["'self'"],
         'font-src': ["'self'"],
         'object-src': ["'none'"],
@@ -41,6 +42,8 @@ function createApp() {
     next();
   });
 
+  // Product photo uploads are larger than any other request; everything else keeps the 50 KB cap.
+  app.use('/api/admin/uploads', express.json({ limit: '3mb' }));
   app.use(express.json({ limit: '50kb' }));
   app.use(cookieParser());
 
@@ -73,6 +76,7 @@ function createApp() {
   app.use('/api', api);
   // Self-hosted web fonts (Fraunces + Manrope), so the CSP can stay 'self'-only.
   app.use('/fonts', express.static(path.join(__dirname, 'node_modules', '@fontsource'), { maxAge: '30d', immutable: true }));
+  app.use('/uploads', express.static(config.uploadDir, { maxAge: '7d', index: false }));
   app.use(express.static(path.join(__dirname, 'public'), {
     index: 'index.html',
     maxAge: config.isProd ? '1h' : 0,

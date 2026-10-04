@@ -6,7 +6,7 @@ const { HttpError, requireAuth, audit, v } = require('../security');
 const router = express.Router();
 
 const PRODUCT_COLS = `p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.sold_count,
-  p.emoji, p.color, p.express, p.is_deal, c.slug AS category, c.name AS category_name`;
+  p.emoji, p.color, p.image, p.express, p.is_deal, c.slug AS category, c.name AS category_name`;
 
 const SORTS = {
   relevance: 'p.is_deal DESC, p.sold_count DESC',

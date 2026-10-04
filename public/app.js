@@ -3,7 +3,7 @@
  * so product data, reviews and user input cannot inject markup (XSS-safe by construction). */
 'use strict';
 
-const state = { user: null, csrf: null, categories: [], config: {}, cartCount: 0, timers: [] };
+const state = { user: null, csrf: null, categories: [], config: {}, cartCount: 0, timers: [], wish: new Set() };
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $('#app');
 
@@ -103,6 +103,13 @@ async function refreshSession() {
   const me = await api('GET', '/auth/me');
   state.user = me.user;
   state.csrf = me.csrfToken || null;
+  await loadWishlistIds();
+}
+
+async function loadWishlistIds() {
+  state.wish = new Set();
+  if (!state.user) return;
+  try { (await api('GET', '/wishlist')).items.forEach((i) => state.wish.add(i.id)); } catch { /* shown as not saved */ }
 }
 
 async function updateCartCount() {
@@ -127,6 +134,7 @@ function renderHeader() {
 async function afterLogin(data, redirect) {
   state.user = data.user;
   state.csrf = data.csrfToken;
+  await loadWishlistIds();
   const guest = guestCart();
   if (guest.length) {
     try { await api('POST', '/cart/merge', { items: guest }); } catch { /* ignore */ }
@@ -138,10 +146,24 @@ async function afterLogin(data, redirect) {
 
 async function logout() {
   await api('POST', '/auth/logout').catch(() => {});
-  state.user = null; state.csrf = null;
+  state.user = null; state.csrf = null; state.wish = new Set();
   renderHeader();
   toast('You have been signed out.');
   location.hash = '#/';
+}
+
+/** In-page yes/no question (browser confirm() boxes are blocked in some app views). */
+function askConfirm(message, yesLabel = 'Yes') {
+  return new Promise((resolve) => {
+    const modal = $('#modal');
+    const done = (answer) => { modal.close(); resolve(answer); };
+    $('#modal-body').replaceChildren(h('h3', null, message),
+      h('div', { style: { display: 'flex', gap: '8px', marginTop: '16px' } },
+        h('button', { type: 'button', class: 'btn btn-primary', onclick: () => done(true) }, yesLabel),
+        h('button', { type: 'button', class: 'btn btn-outline', onclick: () => done(false) }, 'No, go back')));
+    modal.addEventListener('cancel', () => resolve(false), { once: true });
+    modal.showModal();
+  });
 }
 
 // ---------------- Cart actions ----------------
@@ -165,11 +187,46 @@ async function addToCart(product, qty = 1, buyNow = false) {
 
 async function toggleWishlist(product, btn) {
   if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent(location.hash); return; }
+  const saved = state.wish.has(product.id);
   try {
-    await api('POST', '/wishlist', { productId: product.id });
-    toast('Saved to your wishlist');
-    if (btn) { btn.textContent = btn.classList.contains('heart') ? '♥' : 'Saved to wishlist'; btn.classList.add('on'); }
+    if (saved) {
+      await api('DELETE', `/wishlist/${product.id}`);
+      state.wish.delete(product.id);
+      toast('Removed from your wishlist');
+    } else {
+      await api('POST', '/wishlist', { productId: product.id });
+      state.wish.add(product.id);
+      toast('Saved to your wishlist');
+    }
+    document.querySelectorAll(`[data-wish="${product.id}"]`).forEach(paintWishButton);
+    if (btn && !btn.dataset.wish) paintWishButton(btn);
   } catch (e) { fail(e); }
+}
+
+/** Shows a wishlist button as saved or not; the same button saves and removes. */
+function paintWishButton(btn) {
+  const saved = state.wish.has(Number(btn.dataset.wish));
+  btn.classList.toggle('on', saved);
+  btn.setAttribute('aria-pressed', String(saved));
+  if (btn.classList.contains('heart')) {
+    btn.textContent = saved ? '♥' : '♡';
+    btn.setAttribute('aria-label', saved ? 'Remove from wishlist' : 'Save to wishlist');
+    btn.title = saved ? 'Remove from wishlist' : 'Save to wishlist';
+  } else {
+    btn.textContent = saved ? 'Saved to wishlist (tap to remove)' : 'Save to wishlist';
+  }
+  return btn;
+}
+
+// ---------------- Product photo ----------------
+/** Product photo when one is set, otherwise the coloured tile with the product's icon. */
+function pic(p, cls, attrs = {}) {
+  const tile = h('div', { class: cls, style: { background: p.color || 'var(--paper-2)' }, ...attrs }, p.emoji || '📦');
+  if (!p.image) return tile;
+  const img = h('img', { src: p.image, alt: p.title || '', loading: 'lazy', decoding: 'async' });
+  const box = h('div', { class: cls + ' has-photo', ...attrs }, img);
+  img.addEventListener('error', () => box.replaceWith(tile), { once: true });
+  return box;
 }
 
 // ---------------- Product card ----------------
@@ -178,9 +235,9 @@ function productCard(p, { compact } = {}) {
   return h('article', { class: 'pcard' },
     h('div', { class: 'pimg-wrap' },
       h('a', { href: url, 'aria-label': p.title, tabIndex: -1 },
-        h('div', { class: 'pimg', style: { background: p.color } }, p.emoji)),
+        pic(p, 'pimg')),
       p.is_deal ? h('span', { class: 'tag-steal' }, 'Deal') : null,
-      h('button', { class: 'heart', type: 'button', 'aria-label': 'Save to wishlist', onclick: (e) => toggleWishlist(p, e.currentTarget) }, '♡')),
+      paintWishButton(h('button', { class: 'heart', type: 'button', 'data-wish': p.id, onclick: (e) => toggleWishlist(p, e.currentTarget) }))),
     h('div', { class: 'pbody' },
       p.brand ? h('div', { class: 'brand' }, p.brand) : null,
       h('a', { class: 'title', href: url }, p.title),
@@ -216,8 +273,8 @@ async function viewHome() {
           h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Shop deals'),
           h('a', { class: 'btn btn-outline', href: '#/s?sort=newest' }, 'New arrivals'))),
       h('div', { class: 'hero-collage', 'aria-hidden': 'true' }, collage.map((p, i) =>
-        h('a', { class: `collage-tile t${i}`, href: `#/p/${p.id}`, tabIndex: -1, style: { background: p.color } },
-          h('span', { class: 'collage-emoji' }, p.emoji), h('span', { class: 'collage-price' }, inr(p.price)))))),
+        h('a', { class: `collage-tile t${i}${p.image ? ' has-photo' : ''}`, href: `#/p/${p.id}`, tabIndex: -1, style: { background: p.color } },
+          p.image ? h('img', { src: p.image, alt: '', loading: 'lazy' }) : h('span', { class: 'collage-emoji' }, p.emoji), h('span', { class: 'collage-price' }, inr(p.price)))))),
     h('section', { class: 'section' },
       h('div', { class: 'section-head' }, h('div', null, h('h2', null, 'Shop by category'), h('p', { class: 'tagline' }, 'Browse all departments'))),
       h('div', { class: 'cat-row' }, state.categories.map((c) => h('a', { class: 'cat', href: `#/s?category=${c.slug}` }, c.name)))),
@@ -284,7 +341,11 @@ async function viewSearch(params) {
     Array.from({ length: data.pages }, (_, i) => h('button', { class: 'btn' + (i + 1 === data.page ? ' cur' : ''), onclick: () => go({ page: i + 1 }) }, i + 1)),
     h('button', { class: 'btn', disabled: data.page >= data.pages, onclick: () => go({ page: data.page + 1 }) }, 'Next ›')) : null;
 
-  mount(h('div', { class: 'search-layout' }, filters,
+  // On phones the filters fold away behind one button so results come first.
+  const filterCount = ['express', 'instock', 'category', 'rating', 'brand', 'min', 'max', 'deals'].filter((k) => q.get(k)).length;
+  const filterBox = h('details', { class: 'filters-fold', open: window.matchMedia('(min-width: 1081px)').matches },
+    h('summary', null, filterCount ? `Filters (${filterCount})` : 'Filters'), filters);
+  mount(h('div', { class: 'search-layout' }, filterBox,
     h('section', null,
       h('div', { class: 'results-bar' },
         h('div', null, h('h1', { class: 'results-title' }, heading), h('span', { class: 'muted' }, data.total ? `Showing ${start}–${Math.min(start + data.pageSize - 1, data.total)} of ${data.total} products` : 'No products found')),
@@ -344,14 +405,14 @@ async function viewProduct(id) {
       h('button', { class: 'btn btn-outline', style: { marginTop: '12px' } }, 'Post review'));
   };
 
-  const wishBtn = h('button', { class: 'btn btn-outline', type: 'button', onclick: (e) => toggleWishlist(p, e.currentTarget) }, 'Save to wishlist');
+  const wishBtn = paintWishButton(h('button', { class: 'btn btn-outline', type: 'button', 'data-wish': p.id, onclick: (e) => toggleWishlist(p, e.currentTarget) }));
 
   mount(
     h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, 'Home'), ' / ',
       h('a', { href: `#/s?category=${p.category}` }, p.category_name), ' / ', h('span', null, p.brand)),
     h('div', { class: 'pdp' },
       h('div', { class: 'pdp-gallery' },
-        h('div', { class: 'pdp-img', style: { background: p.color }, role: 'img', 'aria-label': p.title }, p.emoji),
+        pic(p, 'pdp-img', { role: 'img', 'aria-label': p.title }),
         h('div', { class: 'trust' },
           h('div', null, `${state.config.returnWindowDays || 10}-day returns`),
           h('div', null, 'Free delivery'),
@@ -385,7 +446,7 @@ async function viewProduct(id) {
     h('section', { class: 'reviews', id: 'reviews' },
       h('div', { class: 'review-summary' }, h('h2', null, 'What shoppers say'),
         h('div', { class: 'big-rating' }, h('b', null, p.rating_avg.toFixed(1)), h('span', { class: 'muted' }, 'out of 5'), h('span', { class: 'muted' }, `${p.rating_count.toLocaleString('en-IN')} ratings`)),
-        distRows, h('hr'), reviewForm()),
+        total ? distRows : h('p', { class: 'muted small' }, 'The star breakdown appears once shoppers post written reviews.'), h('hr'), reviewForm()),
       h('div', null, h('h3', null, 'Recent reviews'),
         data.reviews.length ? data.reviews.map((r) => h('div', { class: 'review' },
           h('div', { class: 'who' }, h('span', { class: 'avatar' }, r.author[0].toUpperCase()),
@@ -424,7 +485,7 @@ async function viewCart() {
   });
 
   const line = (l, saved) => h('div', { class: 'line' },
-    h('a', { href: `#/p/${l.product_id}`, tabIndex: -1 }, h('div', { class: 'pimg', style: { background: l.color } }, l.emoji)),
+    h('a', { href: `#/p/${l.product_id}`, tabIndex: -1 }, pic(l, 'pimg')),
     h('div', null,
       h('a', { class: 'line-title', href: `#/p/${l.product_id}` }, l.title),
       l.stock > 0 ? h('div', { class: l.stock < 10 ? 'low' : 'ok' }, l.stock < 10 ? `Only ${l.stock} left` : 'In stock') : h('div', { class: 'err' }, 'Out of stock'),
@@ -599,7 +660,7 @@ async function viewCheckout() {
           } }, 'Apply')),
           h('p', { class: 'hint' }, 'Try WELCOME10, SAVE100 or FESTIVE15')),
         h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '3'), 'Your items'),
-          cart.lines.map((l) => h('div', { class: 'order-item' }, h('div', { class: 'pimg', style: { background: l.color } }, l.emoji),
+          cart.lines.map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
             h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
               h('div', { class: 'ok' }, `Delivery: ${deliveryDate(l.express)}`)))))),
       summaryBox));
@@ -617,7 +678,7 @@ function orderCard(o) {
     h('div', { class: 'order-body' },
       h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
       o.items.map((it) => h('div', { class: 'order-item' },
-        h('a', { href: `#/p/${it.product_id}` }, h('div', { class: 'pimg', style: { background: '#f3f3f3' } }, it.emoji)),
+        h('a', { href: `#/p/${it.product_id}` }, pic(it, 'pimg')),
         h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'hint' }, `Qty ${it.qty} · ${inr(it.price)}`),
           h('button', { class: 'btn btn-sm btn-outline', onclick: async () => addToCart({ id: it.product_id, title: it.title, stock: 10 }) }, 'Buy again'))))));
 }
@@ -635,7 +696,7 @@ async function viewOrder(id, params) {
   const steps = ['placed', 'packed', 'shipped', 'delivered'];
   const reached = steps.indexOf(o.status);
   const act = async (path, confirmMsg) => {
-    if (!confirm(confirmMsg)) return;
+    if (!(await askConfirm(confirmMsg, 'Yes, continue'))) return;
     try { await api('POST', `/orders/${o.id}/${path}`); toast('Request submitted.'); route(); } catch (e) { fail(e); }
   };
   mount(
@@ -658,7 +719,7 @@ async function viewOrder(id, params) {
     h('div', { class: 'card', style: { marginTop: '16px' } },
       h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
       reached >= 0 ? h('div', { class: 'tracker' }, steps.map((s, i) => h('div', { class: i <= reached ? 'done' : '' }, STATUS_LABEL[s]))) : null,
-      o.items.map((it) => h('div', { class: 'order-item' }, h('div', { class: 'pimg', style: { background: '#f3f3f3' } }, it.emoji),
+      o.items.map((it) => h('div', { class: 'order-item' }, pic(it, 'pimg'),
         h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'muted small' }, `Qty ${it.qty} · `, h('b', { class: 'now-sm' }, inr(it.price))),
           o.status === 'delivered' ? h('a', { class: 'btn btn-sm btn-outline', href: `#/p/${it.product_id}#reviews` }, 'Review this item') : null))),
       h('div', { style: { display: 'flex', gap: '10px', marginTop: '10px' } },
@@ -673,7 +734,7 @@ async function viewWishlist() {
   mount(h('h1', { class: 'page-title' }, 'Your wishlist'),
     items.length ? h('div', { class: 'grid' }, items.map((p) => {
       const c = productCard(p);
-      c.querySelector('.pbody').append(h('button', { class: 'link-btn danger', onclick: async () => { await api('DELETE', `/wishlist/${p.id}`).catch(fail); route(); } }, 'Remove from wishlist'));
+      c.querySelector('.pbody').append(h('button', { class: 'link-btn danger', onclick: async () => { try { await api('DELETE', `/wishlist/${p.id}`); state.wish.delete(p.id); toast('Removed from your wishlist'); } catch (e) { fail(e); } route(); } }, 'Remove from wishlist'));
       return c;
     })) : h('div', { class: 'card empty' }, h('h2', null, 'Nothing saved yet'), h('p', null, 'Tap the heart on any product to keep it here.'), h('a', { class: 'btn btn-primary', href: '#/' }, 'Explore the bazaar')));
 }
@@ -787,7 +848,7 @@ async function viewAddresses() {
         h('div', null, `${a.city}, ${a.state} ${a.pincode}`), h('div', null, `Phone: ${a.phone}`),
         h('div', { class: 'line-actions' },
           h('button', { class: 'link-btn', onclick: () => openForm(a) }, 'Edit'), h('span', { class: 'sep' }, '|'),
-          h('button', { class: 'link-btn', onclick: async () => { if (confirm('Remove this address?')) { await api('DELETE', `/addresses/${a.id}`).catch(fail); route(); } } }, 'Remove'))))));
+          h('button', { class: 'link-btn', onclick: async () => { if (await askConfirm('Remove this address?', 'Remove')) { await api('DELETE', `/addresses/${a.id}`).catch(fail); route(); } } }, 'Remove'))))));
 }
 
 // ---------- Admin ----------
@@ -837,7 +898,7 @@ async function viewAdmin(params) {
         h('form', { onsubmit: async (e) => {
           e.preventDefault();
           const payload = { title: f.title.value, brand: f.brand.value, categoryId: Number(catSel.value), price: Number(f.price.value), mrp: Number(f.mrp.value),
-            stock: Number(f.stock.value), emoji: f.emoji.value, color: f.color.value, description: f.description.value, features: f.features.value,
+            stock: Number(f.stock.value), image: f.image.value, emoji: f.emoji.value, color: f.color.value, description: f.description.value, features: f.features.value,
             express: exp.checked, isDeal: deal.checked, active: act.checked };
           try { if (p) await api('PUT', `/admin/products/${p.id}`, payload); else await api('POST', '/admin/products', payload); toast('Product saved.'); route(); } catch (ex) { fail(ex); }
         } }, h('div', { class: 'form-grid' },
@@ -847,7 +908,8 @@ async function viewAdmin(params) {
           inp('price', 'Selling price (₹)', { type: 'number', min: 1, value: p ? p.price / 100 : '', required: true }),
           inp('mrp', 'MRP (₹)', { type: 'number', min: 1, value: p ? p.mrp / 100 : '', required: true }),
           inp('stock', 'Stock', { type: 'number', min: 0, value: p ? p.stock : 0, required: true }),
-          inp('emoji', 'Image placeholder (emoji)', { value: p ? p.emoji : '📦', maxLength: 8 }),
+          photoField(f, p),
+          inp('emoji', 'Icon shown when there is no photo (emoji)', { value: p ? p.emoji : '📦', maxLength: 8 }),
           inp('color', 'Background colour', { type: 'color', value: p ? p.color : '#e3e6e6' }),
           inp('description', 'Description', { tag: 'textarea', rows: 3, value: p ? p.description : '', maxLength: 4000, full: true }),
           inp('features', 'Key features (one per line)', { tag: 'textarea', rows: 4, value: p ? p.features.join('\n') : '', full: true })),
@@ -859,7 +921,7 @@ async function viewAdmin(params) {
     body.append(h('p', null, h('button', { class: 'btn btn-primary', onclick: () => openForm() }, 'Add a product')), formBox,
       h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['', 'Product', 'Category', 'Price', 'MRP', 'Stock', 'Status', ''].map((t) => h('th', null, t))),
-        products.map((p) => h('tr', null, h('td', null, p.emoji), h('td', null, h('a', { href: `#/p/${p.id}` }, p.title), h('div', { class: 'hint' }, p.brand)),
+        products.map((p) => h('tr', null, h('td', null, pic(p, 'pimg thumb')), h('td', null, h('a', { href: `#/p/${p.id}` }, p.title), h('div', { class: 'hint' }, p.brand)),
           h('td', null, p.category_name), h('td', null, inr(p.price)), h('td', null, inr(p.mrp)),
           h('td', { class: p.stock < 20 ? 'err' : '' }, p.stock), h('td', null, p.active ? 'Active' : 'Inactive'),
           h('td', null, h('button', { class: 'btn btn-sm btn-outline', onclick: () => openForm(p) }, 'Edit')))))));
@@ -903,6 +965,44 @@ async function viewAdmin(params) {
       entries.map((a) => h('tr', null, h('td', null, new Date(a.created_at).toLocaleString('en-IN')), h('td', null, a.email || '—'),
         h('td', null, a.action), h('td', { class: 'hint' }, a.detail || ''), h('td', null, a.ip))))));
   }
+}
+
+/** Shrinks a chosen photo in the browser so uploads stay small and fast (longest side 1000px, JPEG). */
+async function shrinkPhoto(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1000 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+
+/** Bazaario Studio photo picker: upload from the device or paste a link to an image. */
+function photoField(f, p) {
+  f.image = h('input', { type: 'text', inputMode: 'url', value: p ? p.image || '' : '', placeholder: 'https://… (or upload a photo)', maxLength: 1000 });
+  const preview = h('div', { class: 'photo-preview' });
+  const paint = () => preview.replaceChildren(f.image.value ? h('img', { src: f.image.value, alt: 'Product photo preview' }) : h('span', { class: 'muted small' }, 'No photo yet'));
+  f.image.addEventListener('input', paint);
+  const file = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', class: 'sr-only', id: 'photo-file' });
+  file.addEventListener('change', async () => {
+    if (!file.files[0]) return;
+    try {
+      toast('Uploading photo…');
+      const { url } = await api('POST', '/admin/uploads', { dataUrl: await shrinkPhoto(file.files[0]) });
+      f.image.value = url; paint(); toast('Photo added. Save the product to keep it.');
+    } catch (e) { fail(e); }
+    file.value = '';
+  });
+  paint();
+  return h('div', { class: 'full photo-field' }, h('label', null, 'Product photo'),
+    h('div', { class: 'photo-row' }, preview,
+      h('div', { class: 'photo-actions' },
+        h('label', { class: 'btn btn-outline btn-sm', for: 'photo-file' }, 'Upload photo'), file,
+        h('button', { type: 'button', class: 'link-btn danger', onclick: () => { f.image.value = ''; paint(); } }, 'Remove photo'),
+        h('span', { class: 'muted small' }, 'Or paste a link to an image:'), f.image,
+        h('span', { class: 'muted small' }, 'Square photos on a plain background look best.'))));
 }
 
 // ---------- Static info pages ----------

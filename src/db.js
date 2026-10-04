@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS products (
   sold_count INTEGER NOT NULL DEFAULT 0,
   emoji TEXT NOT NULL DEFAULT '📦',
   color TEXT NOT NULL DEFAULT '#e3e6e6',
+  image TEXT NOT NULL DEFAULT '',
   express INTEGER NOT NULL DEFAULT 0,
   is_deal INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -159,7 +160,14 @@ function open(file = config.dbFile) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Brings databases created by older versions up to the current schema. */
+function migrate(d) {
+  const cols = d.prepare('PRAGMA table_info(products)').all().map((c) => c.name);
+  if (!cols.includes('image')) d.exec("ALTER TABLE products ADD COLUMN image TEXT NOT NULL DEFAULT ''");
 }
 
 function get() {
