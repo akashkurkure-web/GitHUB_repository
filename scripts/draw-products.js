@@ -29,10 +29,10 @@ const text = (x, y, s, size, fill, { w = 600, f = SANS, a = 'middle', ls = 0, ex
 function page(bg, body) {
   const back = rad([[0, '#ffffff'], [0.55, bg], [1, shade(bg, -0.08)]], 0.5, 0.38, 0.75);
   const floor = lin([[0, '#000', 0], [1, '#000', 0.06]]);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-134 0 1068 800" width="1068" height="800">
 <defs>${defs.join('')}</defs>
-<rect width="800" height="800" fill="${back}"/>
-<rect y="560" width="800" height="240" fill="${floor}"/>
+<rect x="-134" width="1068" height="800" fill="${back}"/>
+<rect x="-134" y="560" width="1068" height="240" fill="${floor}"/>
 ${body}
 </svg>`;
   defs.length = 0;
@@ -195,28 +195,56 @@ add('urbanthread-shirt', '#e1ecf7', () => {
     `<path d="M285 260 L345 260 L345 300 L285 300 Z" fill="none" stroke="#5f8cc4" stroke-width="3"/>`;
 });
 add('desi-weaves-kurta', '#fbe1ec', () => {
-  const cloth = lin([[0, '#f37ba6'], [1, '#c43f74']], 0, 0, 1, 1);
+  const cloth = lin([[0, '#e8578c'], [0.55, '#c9356c'], [1, '#9c2453']], 0, 0, 1, 1);
+  const gold = '#f3c969';
+  const outline = 'M345 150 L272 178 L212 342 L262 360 L292 282 L274 640 L526 640 L508 282 L538 360 L588 342 L528 178 L455 150 Q400 200 345 150 Z';
+  const buti = (x, y, k) => `<g transform="translate(${x} ${y}) rotate(${k % 2 ? 25 : -25}) scale(.9)"><path d="M0 -16 Q14 -4 8 10 Q2 18 -6 12 Q-14 4 -6 -4 Q2 -10 0 -16 Z" fill="${gold}"/><circle cx="1" cy="6" r="3.5" fill="#fff4d6"/></g>`;
   let motif = '';
-  for (let r = 0; r < 7; r++) for (let c = 0; c < 6; c++) motif += `<g transform="translate(${300 + c * 42 + (r % 2) * 21} ${230 + r * 52})"><circle r="9" fill="#ffd27a"/><circle r="4" fill="#fff6dd"/></g>`;
+  let k = 0;
+  for (let r = 0; r < 7; r++) for (let c = 0; c < 6; c++) motif += buti(300 + c * 42 + (r % 2) * 21, 270 + r * 50, k++);
+  const border = (y) => `<rect x="250" y="${y}" width="300" height="26" fill="#7d1c43"/><path d="M250 ${y + 13} ${Array.from({ length: 15 }, (_, i) => `L${260 + i * 20} ${y + (i % 2 ? 5 : 21)}`).join(' ')} L550 ${y + 13}" fill="none" stroke="${gold}" stroke-width="3"/>`;
   return shadow(400, 690, 220) +
-    `<path d="M400 90 L380 130 L420 130 Z" fill="#9aa1ab"/>` +
-    `<path d="M345 135 L270 165 L215 330 L262 345 L290 270 L270 600 L530 600 L510 270 L538 345 L585 330 L530 165 L455 135 Q400 185 345 135 Z" fill="${cloth}"/>` +
-    `<clipPath id="kclip"><path d="M345 135 L270 165 L215 330 L262 345 L290 270 L270 600 L530 600 L510 270 L538 345 L585 330 L530 165 L455 135 Q400 185 345 135 Z"/></clipPath><g clip-path="url(#kclip)">${motif}</g>` +
-    `<path d="M370 150 L400 245 L430 150" fill="none" stroke="#ffd27a" stroke-width="7"/>` +
-    `<rect x="270" y="570" width="260" height="22" fill="#ffd27a"/>` +
-    `<path d="M300 600 L280 690 L390 690 L400 625 L410 690 L520 690 L500 600 Z" fill="#fff1f6" stroke="#e8b8cb"/>`;
+    `<path d="M400 58 Q424 58 424 80 Q424 96 404 102 L400 118" fill="none" stroke="#8a919b" stroke-width="7" stroke-linecap="round"/>` +
+    `<path d="M300 150 L400 116 L500 150" fill="none" stroke="#a9744a" stroke-width="12" stroke-linecap="round"/>` +
+    `<path d="${outline}" fill="${cloth}"/>` +
+    `<clipPath id="kclip"><path d="${outline}"/></clipPath><g clip-path="url(#kclip)">${motif}${border(608)}` +
+    `<path d="M212 342 L262 360 L268 342 L220 322 Z M588 342 L538 360 L532 342 L580 322 Z" fill="#7d1c43"/>` +
+    `<path d="M220 322 L268 342 M580 322 L532 342" stroke="${gold}" stroke-width="3"/>` +
+    `<path d="M400 140 L400 640" stroke="#000" stroke-opacity=".08" stroke-width="40"/></g>` +
+    `<path d="M345 150 Q400 200 455 150 L470 168 Q400 228 330 168 Z" fill="#7d1c43"/>` +
+    `<path d="M338 162 Q400 214 462 162" fill="none" stroke="${gold}" stroke-width="4" stroke-dasharray="2 7" stroke-linecap="round"/>` +
+    `<path d="M400 190 L400 300" stroke="#7d1c43" stroke-width="16" stroke-linecap="round"/>` +
+    [215, 245, 275].map((y) => `<circle cx="400" cy="${y}" r="5" fill="${gold}"/>`).join('');
 });
 add('stride-running-shoes', '#e6f4ea', () => {
-  const upper = lin([[0, '#5fd38d'], [1, '#1e8a52']], 0, 0, 1, 1);
+  const upper = lin([[0, '#4cc985'], [0.6, '#22a062'], [1, '#157a48']], 0, 0, 1, 1);
+  const knit = lin([[0, '#ffffff', 0.16], [1, '#ffffff', 0]], 0, 0, 1, 0);
   let mesh = '';
-  for (let i = 0; i < 9; i++) mesh += `<path d="M${300 + i * 30} 330 L${280 + i * 30} 450" stroke="#fff" stroke-opacity=".18" stroke-width="3"/>`;
-  return shadow(400, 560, 300, 26) +
-    `<path d="M140 470 Q140 400 210 390 L300 370 Q360 300 430 300 L470 300 Q520 360 600 380 Q680 400 680 450 L680 480 L140 500 Z" fill="${upper}"/>` + mesh +
-    `<path d="M120 500 Q120 470 150 470 L690 450 Q720 450 720 480 L720 500 Q720 530 690 530 L160 540 Q120 540 120 510 Z" fill="${lin([[0, '#ffffff'], [1, '#dfe6e1']], 0, 0, 0, 1)}"/>` +
-    `<path d="M120 520 L720 505 L720 512 Q720 540 690 540 L160 548 Q125 548 120 528 Z" fill="#2b3a33"/>` +
-    `<path d="M330 360 L480 330 M345 385 L495 352 M360 410 L510 374" stroke="#fff" stroke-width="7" stroke-linecap="round"/>` +
-    `<path d="M220 440 Q330 400 470 430 Q560 450 640 430" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" opacity=".9"/>` +
-    `<path d="M430 300 L470 300 Q460 280 440 282 Z" fill="#1e8a52"/>`;
+  for (let i = 0; i < 14; i++) mesh += `<path d="M${250 + i * 26} 470 Q${262 + i * 26} 420 ${258 + i * 26} 360" stroke="#fff" stroke-opacity=".12" stroke-width="3" fill="none"/>`;
+  let tread = '';
+  for (let i = 0; i < 18; i++) tread += `<rect x="${150 + i * 31}" y="532" width="16" height="10" rx="3" fill="#1d2722"/>`;
+  let laces = '';
+  for (let i = 0; i < 5; i++) {
+    const x = 352 + i * 30, y = 318 + i * 14;
+    laces += `<path d="M${x - 14} ${y + 26} L${x + 22} ${y - 2}" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>` +
+      `<circle cx="${x - 16}" cy="${y + 30}" r="5" fill="#0f5b35"/><circle cx="${x + 24}" cy="${y - 4}" r="5" fill="#0f5b35"/>`;
+  }
+  const shoe = 'M128 488 L132 372 Q136 330 176 318 Q214 334 262 336 Q314 334 344 306 L378 274 Q400 254 428 266 L446 290 Q520 356 626 394 Q704 420 708 470 L708 490 Z';
+  return shadow(410, 572, 320, 24) +
+    `<path d="${shoe}" fill="${upper}"/>` +
+    `<clipPath id="shoeclip"><path d="${shoe}"/></clipPath><g clip-path="url(#shoeclip)">${mesh}<rect x="120" y="250" width="600" height="250" fill="${knit}"/>` +
+    `<path d="M120 500 L120 360 Q170 340 214 352 Q236 420 226 500 Z" fill="#0f5b35"/>` +
+    `<path d="M560 386 Q676 408 712 470 L712 500 L548 500 Q530 440 560 386 Z" fill="#7fe0aa"/></g>` +
+    `<path d="M176 318 Q214 334 262 336 Q314 334 344 306 Q300 316 262 318 Q210 318 176 318 Z" fill="#0b3d24"/>` +
+    `<path d="M146 330 L132 286 Q130 272 144 272 L166 278 Q174 296 176 318 Z" fill="#157a48"/>` +
+    `<path d="M384 270 Q402 236 428 246 L446 290 L428 266 Q404 256 384 270 Z" fill="#0f5b35"/>` +
+    `<path d="M262 468 Q390 388 590 358 Q630 352 640 360 Q470 400 300 482 Z" fill="#ffffff"/>` +
+    laces +
+    `<path d="M108 488 Q100 548 150 550 L668 546 Q724 540 722 492 L716 466 Q706 486 660 490 Z" fill="${lin([[0, '#ffffff'], [1, '#d9e2dc']], 0, 0, 0, 1)}"/>` +
+    `<path d="M150 512 Q400 520 712 500" fill="none" stroke="#22a062" stroke-width="5" opacity=".7"/>` +
+    `<path d="M104 528 Q110 552 150 552 L668 548 Q712 546 722 516 L722 528 Q716 560 668 562 L150 566 Q106 566 104 540 Z" fill="#2b3a33"/>` + tread +
+    `<path d="M210 360 Q240 352 270 356" stroke="#fff" stroke-opacity=".35" stroke-width="6" fill="none" stroke-linecap="round"/>` +
+    text(186, 430, 'STRIDE', 16, '#ffffff', { w: 800, ls: 3, extra: 'transform="rotate(-84 186 430)" opacity=".85"' });
 });
 add('suncraft-aviators', '#f3f0e6', () => {
   const lens = lin([[0, '#2e3b4e'], [0.55, '#5d6f8a'], [1, '#c7a96a']], 0, 0, 0.3, 1);
