@@ -4,14 +4,67 @@ const db = require('./db');
 const { HttpError } = require('./security');
 const delivery = require('./delivery');
 const wallet = require('./wallet');
+const market = require('./market');
 
-/** Server-side source of truth for cart totals. Client-sent prices are never trusted. */
-function cartLines(userId) {
-  return db.get().prepare(
-    `SELECT c.product_id, c.qty, p.title, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.active, p.express
-       FROM cart_items c JOIN products p ON p.id = c.product_id
+/**
+ * Server-side source of truth for the bag. Client-sent prices are never trusted.
+ * Each line is bought from one offer: the one the buyer picked under "Other sellers", or else the best offer that can
+ * deliver to `state` (Value sellers sell only within their own state).
+ */
+function cartLines(userId, { state = null } = {}) {
+  const d = db.get();
+  const rows = d.prepare(
+    `SELECT c.product_id, c.qty, c.offer_id AS chosen_offer_id, p.title, p.price AS list_price, p.mrp, p.emoji, p.color, p.image,
+            p.active, p.express, p.hsn, p.gst_rate, cat.slug AS category
+       FROM cart_items c JOIN products p ON p.id = c.product_id JOIN categories cat ON cat.id = p.category_id
       WHERE c.user_id = ? AND c.saved_for_later = 0 ORDER BY c.added_at DESC`
   ).all(userId);
+  return rows.map((r) => {
+    const offers = market.offersFor(d, r.product_id);
+    const usable = (o) => o && o.active && o.status === 'approved';
+    let offer = null;
+    let note = '';
+    if (r.chosen_offer_id) {
+      offer = offers.find((o) => o.id === r.chosen_offer_id);
+      if (!usable(offer)) { offer = null; note = 'The seller you chose has stopped selling this item, so the next best offer is shown.'; }
+    }
+    if (!offer) {
+      const ranked = market.rankOffers(offers);
+      offer = ranked.find((o) => market.deliverable(o, state)) || ranked[0] || null;
+    }
+    const blocked = offer && !market.deliverable(offer, state) ? `${offer.seller_name} delivers only within ${offer.pickup_state}.` : '';
+    return {
+      product_id: r.product_id, qty: r.qty, title: r.title, mrp: r.mrp, emoji: r.emoji, color: r.color, image: r.image,
+      category: r.category, hsn: r.hsn, gst_rate: r.gst_rate,
+      active: r.active && !!offer ? 1 : 0,
+      price: offer ? offer.price : r.list_price,
+      stock: offer ? offer.stock : 0,
+      offer_id: offer ? offer.id : null,
+      seller_id: offer ? offer.seller_id : null,
+      seller_name: offer ? offer.seller_name : '',
+      lane: offer ? offer.lane : null,
+      pickup_state: offer ? offer.pickup_state : null,
+      dispatch_days: offer ? offer.dispatch_days : 1,
+      assured: offer && market.isAssured(offer, offer) ? 1 : 0,
+      // Express comes from Bazaario's own stock in city stores (partner shops join in Phase C).
+      express: offer && offer.lane === 'direct' ? r.express : 0,
+      chosen: !!r.chosen_offer_id,
+      blocked, note,
+    };
+  });
+}
+
+/** Lines grouped by seller: each group ships as its own package and becomes its own order. */
+function packagesOf(lines) {
+  const map = new Map();
+  for (const l of lines) {
+    const key = l.seller_id || 0;
+    if (!map.has(key)) map.set(key, { sellerId: l.seller_id, sellerName: l.seller_name, lane: l.lane, lines: [], extraDays: 0 });
+    const p = map.get(key);
+    p.lines.push(l);
+    p.extraDays = Math.max(p.extraDays, market.extraDays(l));
+  }
+  return [...map.values()];
 }
 
 function couponDiscount(code, subtotal) {
@@ -43,15 +96,22 @@ function codCheck(userId, pincode, payable) {
  * `opts.useWallet` spends wallet balance first. `payable` is what the chosen payment method must cover.
  */
 function quote(userId, couponCode, paymentMethod, opts = {}) {
-  const lines = cartLines(userId);
+  const lines = cartLines(userId, { state: opts.state });
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const mrpTotal = lines.reduce((s, l) => s + l.mrp * l.qty, 0);
   const { discount, coupon } = couponDiscount(couponCode, subtotal);
   const shipping = subtotal === 0 || subtotal >= config.freeShippingThreshold ? 0 : config.shippingFee;
-  const promise = opts.pincode ? delivery.options(opts.pincode, lines) : null;
+  const packages = packagesOf(lines);
+  const slowest = packages.reduce((m, p) => Math.max(m, p.extraDays), 0);
+  const promise = opts.pincode ? delivery.options(opts.pincode, lines, Date.now(), slowest) : null;
   const speeds = promise ? promise.options : [];
   const chosen = speeds.find((o) => o.speed === opts.speed) || speeds.find((o) => o.speed === 'standard') || null;
   const speed = chosen ? chosen.speed : 'standard';
+  if (promise) {
+    for (const p of packages) {
+      p.promisedAt = speed === 'express' ? chosen.promisedAt : delivery.standardPromise(delivery.zoneOf(opts.pincode).days + p.extraDays);
+    }
+  }
   const expressFee = speed === 'express' ? config.expressFee : 0;
   const codFee = paymentMethod === 'cod' ? config.codFee : 0;
   const total = subtotal - discount + shipping + expressFee + codFee;
@@ -59,7 +119,9 @@ function quote(userId, couponCode, paymentMethod, opts = {}) {
   const walletApplied = opts.useWallet ? Math.min(walletBalance, total) : 0;
   const payable = total - walletApplied;
   return {
-    lines, subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, expressFee, codFee, total,
+    lines, packages: packages.map((p) => ({ ...p, lines: p.lines.map((l) => l.product_id) })),
+    blocked: lines.filter((l) => l.blocked).map((l) => `${l.title}: ${l.blocked}`),
+    subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, expressFee, codFee, total,
     walletBalance, walletApplied, payable,
     speed, promisedAt: chosen ? chosen.promisedAt : null, speeds,
     cod: codCheck(userId, opts.pincode, payable),
@@ -67,4 +129,4 @@ function quote(userId, couponCode, paymentMethod, opts = {}) {
   };
 }
 
-module.exports = { cartLines, quote, couponDiscount, codCheck };
+module.exports = { cartLines, packagesOf, quote, couponDiscount, codCheck };

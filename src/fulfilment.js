@@ -4,6 +4,7 @@ const config = require('./config');
 const wallet = require('./wallet');
 const payments = require('./payments');
 const notify = require('./notify');
+const market = require('./market');
 const { HttpError } = require('./security');
 
 /**
@@ -37,10 +38,16 @@ function event(d, orderId, status, note = '') {
   d.prepare('INSERT INTO order_events (order_id, status, note, created_at) VALUES (?,?,?,?)').run(orderId, status, note, Date.now());
 }
 
+/** Puts an order's items back on the shelf of the offer they were sold from. */
 function restock(d, orderId) {
-  const items = d.prepare('SELECT product_id, qty FROM order_items WHERE order_id = ?').all(orderId);
-  const up = d.prepare('UPDATE products SET stock = stock + ?, sold_count = MAX(0, sold_count - ?) WHERE id = ?');
-  for (const it of items) up.run(it.qty, it.qty, it.product_id);
+  const items = d.prepare('SELECT product_id, offer_id, qty FROM order_items WHERE order_id = ?').all(orderId);
+  const sold = d.prepare('UPDATE products SET sold_count = MAX(0, sold_count - ?) WHERE id = ?');
+  for (const it of items) {
+    if (it.offer_id) market.moveStock(d, it.offer_id, it.qty);
+    else d.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(it.qty, it.product_id);
+    sold.run(it.qty, it.product_id);
+    if (it.offer_id) market.syncProduct(d, it.product_id);
+  }
 }
 
 const fmtTime = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
@@ -70,8 +77,11 @@ function settleRefund(d, o, { toWallet = false, reason }) {
   return { paymentStatus: refunded ? 'refunded' : o.payment_status, note };
 }
 
-/** Moves an order to `next`. `actor` is 'customer', 'admin' or 'system'. Must run inside db.tx(). */
-function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = false, allowAny = false } = {}) {
+/**
+ * Moves an order to `next`. `actor` is 'customer', 'seller', 'admin' or 'system'. Must run inside db.tx().
+ * A self-shipping seller passes their own `courier` and `awb`; `quiet` skips the buyer message.
+ */
+function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = false, allowAny = false, courier, awb, quiet = false } = {}) {
   const o = d.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   if (!o) throw new HttpError(404, 'Order not found.');
   if (actor === 'customer' && next === 'cancelled' && !CUSTOMER_CANCELLABLE.includes(o.status)) {
@@ -81,23 +91,32 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
     throw new HttpError(400, `This order is ${LABEL[o.status].toLowerCase()} and cannot be moved to "${LABEL[next] || next}".`);
   }
   const now = Date.now();
-  const set = { status: next, payment_status: o.payment_status, courier: o.courier, awb: o.awb, delivered_at: o.delivered_at };
+  const set = { status: next, payment_status: o.payment_status, courier: o.courier, awb: o.awb, delivered_at: o.delivered_at, shipped_at: o.shipped_at };
   let text = '';
   let eventNote = note;
 
   if (next === 'confirmed') text = 'Your order is confirmed.';
   if (next === 'packed') text = 'Your order is packed and will ship soon.';
   if (next === 'shipped') {
-    if (o.delivery_speed === 'express') {
+    if (o.awb) {
+      // The courier was booked when the seller packed the order; this is the pickup scan.
+      text = `Shipped with ${set.courier}, tracking number ${set.awb}.`;
+    } else if (o.delivery_speed === 'express') {
       set.courier = 'Bazaario Express rider';
       set.awb = `EXP${crypto.randomInt(1e7, 1e8)}`;
       text = 'A rider has picked up your Express order.';
+    } else if (courier && awb) {
+      // Self Ship sellers book their own courier and enter its tracking number.
+      set.courier = courier;
+      set.awb = awb;
+      text = `Shipped with ${set.courier}, tracking number ${set.awb}.`;
     } else {
       // Test courier: generates the airway bill number a shipping partner would return.
       set.courier = config.courierProvider === 'test' ? 'Bazaario Logistics' : config.courierProvider;
       set.awb = `BZL${crypto.randomInt(1e9, 1e10)}`;
       text = `Shipped with ${set.courier}, tracking number ${set.awb}.`;
     }
+    set.shipped_at = now;
     eventNote = eventNote || `${set.courier} · ${set.awb}`;
   }
   if (next === 'out_for_delivery') text = o.payment_method === 'cod' ? `Out for delivery today. Please keep ₹${(o.total - o.wallet_used) / 100} ready.` : 'Out for delivery today.';
@@ -115,15 +134,20 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
     const r = settleRefund(d, { ...o, payment_status: set.payment_status }, { toWallet: refundToWallet, reason });
     set.payment_status = r.paymentStatus;
     restock(d, orderId);
+    // An order cancelled while it waited for a seller closes that request too.
+    d.prepare("UPDATE order_routes SET decided_at = ?, note = 'Order closed before the seller answered' WHERE order_id = ? AND outcome = 'waiting'")
+      .run(now, orderId);
     eventNote = [eventNote, r.note].filter(Boolean).join(' ');
     text = next === 'cancelled' ? 'Your order is cancelled.' : next === 'rto' ? 'Your order could not be delivered and is coming back to us.' : 'Your return is complete.';
     if (r.note) text += ' ' + r.note;
   }
 
-  d.prepare(`UPDATE orders SET status = ?, payment_status = ?, courier = ?, awb = ?, delivered_at = ?, updated_at = ? WHERE id = ?`)
-    .run(set.status, set.payment_status, set.courier, set.awb, set.delivered_at, now, orderId);
+  d.prepare(`UPDATE orders SET status = ?, payment_status = ?, courier = ?, awb = ?, delivered_at = ?, shipped_at = ?, updated_at = ? WHERE id = ?`)
+    .run(set.status, set.payment_status, set.courier, set.awb, set.delivered_at, set.shipped_at, now, orderId);
   event(d, orderId, next, eventNote);
-  if (text) notify.orderUpdate(d, o, text);
+  if (text && !quiet) notify.orderUpdate(d, o, text);
+  // Shipping, delivery and cancellations feed the seller's performance score.
+  if (o.seller_id && ['shipped', 'delivered', 'cancelled', 'returned'].includes(next)) market.refreshScore(d, o.seller_id);
   return { ...o, ...set };
 }
 

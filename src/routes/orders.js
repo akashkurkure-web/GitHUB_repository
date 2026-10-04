@@ -8,6 +8,9 @@ const payments = require('../payments');
 const wallet = require('../wallet');
 const notify = require('../notify');
 const { move, event, restock, LABEL, fmtTime } = require('../fulfilment');
+const market = require('../market');
+const routing = require('../routing');
+const { invoice } = require('../invoice');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 const router = express.Router();
@@ -23,11 +26,12 @@ function readCheckout(body, userId) {
   const coupon = body.coupon ? v.str(body.coupon, 'Coupon code', { max: 20, pattern: /^[A-Za-z0-9]+$/ }) : null;
   const speed = body.speed === 'express' ? 'express' : 'standard';
   let pincode = null;
+  let state = null;
   if (body.addressId) {
-    const a = db.get().prepare('SELECT pincode FROM addresses WHERE id = ? AND user_id = ?').get(Number(body.addressId), userId);
-    if (a) pincode = a.pincode;
+    const a = db.get().prepare('SELECT pincode, state FROM addresses WHERE id = ? AND user_id = ?').get(Number(body.addressId), userId);
+    if (a) ({ pincode, state } = a);
   }
-  return { coupon, speed, pincode, useWallet: !!body.useWallet };
+  return { coupon, speed, pincode, state, useWallet: !!body.useWallet };
 }
 
 router.post('/checkout/quote', (req, res) => {
@@ -35,16 +39,32 @@ router.post('/checkout/quote', (req, res) => {
   res.json(quote(req.user.id, c.coupon, req.body.paymentMethod, c));
 });
 
+/** Splits `amount` across parts in proportion to `weights`; rounding leftovers go to the first part. */
+function allocate(amount, weights) {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const parts = weights.map((w) => (sum ? Math.floor((amount * w) / sum) : 0));
+  parts[0] += amount - parts.reduce((a, b) => a + b, 0);
+  return parts;
+}
+
+/**
+ * Places the bag. Each seller's items become their own order (their own package, tracking and invoice);
+ * the orders share one checkout reference and one payment. Fees sit on the first order and the coupon and wallet
+ * are shared in proportion, so refunding any one order gives back exactly what was paid for it.
+ */
 router.post('/orders', (req, res) => {
   const addressId = v.int(req.body.addressId, 'Delivery address', { min: 1 });
   let method = String(req.body.paymentMethod || '');
   const c = readCheckout(req.body, req.user.id);
   const idem = req.body.idempotencyKey ? v.str(req.body.idempotencyKey, 'Idempotency key', { min: 8, max: 64, pattern: /^[A-Za-z0-9-]+$/ }) : null;
 
-  // Double-click / retry protection: the same key returns the order already placed.
+  // Double-click / retry protection: the same key returns the orders already placed.
   if (idem) {
-    const prior = db.get().prepare('SELECT id, order_no FROM orders WHERE user_id = ? AND idempotency_key = ?').get(req.user.id, idem);
-    if (prior) return res.status(200).json({ orderId: prior.id, orderNo: prior.order_no, duplicate: true });
+    const prior = db.get().prepare('SELECT id, order_no, checkout_ref FROM orders WHERE user_id = ? AND idempotency_key = ?').get(req.user.id, idem);
+    if (prior) {
+      const orders = db.get().prepare('SELECT id, order_no AS orderNo FROM orders WHERE checkout_ref = ? ORDER BY id').all(prior.checkout_ref);
+      return res.status(200).json({ orderId: prior.id, orderNo: prior.order_no, checkoutRef: prior.checkout_ref, orders, duplicate: true });
+    }
   }
 
   const address = db.get().prepare('SELECT * FROM addresses WHERE id = ? AND user_id = ?').get(addressId, req.user.id);
@@ -56,6 +76,7 @@ router.post('/orders', (req, res) => {
     for (const l of q.lines) {
       if (!l.active) throw new HttpError(409, `"${l.title}" is no longer available. Please remove it from your cart.`);
       if (l.qty > l.stock) throw new HttpError(409, `Only ${l.stock} unit(s) of "${l.title}" left. Please update your cart.`);
+      if (l.blocked) throw new HttpError(409, `"${l.title}": ${l.blocked} Please choose another seller for this address.`);
     }
     if (c.speed === 'express' && q.speed !== 'express') {
       throw new HttpError(409, 'Express delivery is not available for this address or these items. Please choose Standard delivery.');
@@ -64,34 +85,61 @@ router.post('/orders', (req, res) => {
     if (method === 'cod' && !q.cod.ok) throw new HttpError(400, q.cod.reason);
     const pay = payments.charge(method, req.body.payment, q.payable);
     const now = Date.now();
-    const no = orderNo();
+    const checkoutRef = `CK-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
     const snapshot = JSON.stringify({
       fullName: address.full_name, phone: address.phone, line1: address.line1, line2: address.line2,
       city: address.city, state: address.state, pincode: address.pincode,
     });
-    const orderId = Number(d.prepare(`INSERT INTO orders (order_no, user_id, status, subtotal, discount, shipping, total, wallet_used,
+    const byId = new Map(q.lines.map((l) => [l.product_id, l]));
+    const packs = q.packages.map((p) => ({ ...p, lines: p.lines.map((id) => byId.get(id)) }));
+    const subs = packs.map((p) => p.lines.reduce((s, l) => s + l.price * l.qty, 0));
+    const discounts = allocate(q.discount, subs);
+    const fees = q.shipping + q.expressFee + q.codFee;
+    const totals = subs.map((sub, i) => sub - discounts[i] + (i === 0 ? fees : 0));
+    const wallets = allocate(q.walletApplied, totals);
+    const holdReason = routing.riskHold(d, { userId: req.user.id, method, payable: q.payable, lines: q.lines, now });
+
+    const insOrder = d.prepare(`INSERT INTO orders (order_no, user_id, status, subtotal, discount, shipping, total, wallet_used,
         coupon_code, payment_method, payment_status, payment_ref, emi_months, delivery_speed, promised_at, address, idempotency_key,
-        created_at, updated_at) VALUES (?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(no, req.user.id, q.subtotal, q.discount, q.shipping + q.expressFee + q.codFee, q.total, q.walletApplied, q.coupon,
-        method, pay.status, pay.ref, pay.emiMonths || null, q.speed, q.promisedAt, snapshot, idem, now, now).lastInsertRowid);
-    const insItem = d.prepare('INSERT INTO order_items (order_id, product_id, title, emoji, price, qty) VALUES (?,?,?,?,?,?)');
-    // Conditional decrement guards against overselling under concurrency.
-    const decStock = d.prepare('UPDATE products SET stock = stock - ?, sold_count = sold_count + ? WHERE id = ? AND stock >= ?');
-    for (const l of q.lines) {
-      insItem.run(orderId, l.product_id, l.title, l.emoji, l.price, l.qty);
-      if (decStock.run(l.qty, l.qty, l.product_id, l.qty).changes !== 1) throw new HttpError(409, `"${l.title}" just went out of stock.`);
-    }
-    if (q.walletApplied) wallet.post(d, req.user.id, -q.walletApplied, `Paid for order ${no}`, orderId);
+        seller_id, checkout_ref, created_at, updated_at) VALUES (?,?,'placed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const insItem = d.prepare('INSERT INTO order_items (order_id, product_id, offer_id, title, emoji, price, qty, hsn, gst_rate) VALUES (?,?,?,?,?,?,?,?,?)');
+    const sold = d.prepare('UPDATE products SET sold_count = sold_count + ? WHERE id = ?');
+    const orders = [];
+    packs.forEach((p, i) => {
+      const no = orderNo();
+      const orderId = Number(insOrder.run(no, req.user.id, subs[i], discounts[i], i === 0 ? fees : 0, totals[i], wallets[i], q.coupon,
+        method, pay.status, pay.ref, pay.emiMonths || null, q.speed, p.promisedAt || q.promisedAt, snapshot, i === 0 ? idem : null,
+        p.sellerId, checkoutRef, now, now).lastInsertRowid);
+      for (const l of p.lines) {
+        insItem.run(orderId, l.product_id, l.offer_id, l.title, l.emoji, l.price, l.qty, l.hsn, l.gst_rate);
+        // Conditional decrement guards against overselling under concurrency.
+        if (!market.moveStock(d, l.offer_id, -l.qty)) throw new HttpError(409, `"${l.title}" just went out of stock.`);
+        sold.run(l.qty, l.product_id);
+        market.syncProduct(d, l.product_id);
+      }
+      if (wallets[i]) wallet.post(d, req.user.id, -wallets[i], `Paid for order ${no}`, orderId);
+      event(d, orderId, 'placed', method === 'cod' ? 'Cash on Delivery' : `Paid by ${method.toUpperCase()}`);
+      const o = { id: orderId, order_no: no, user_id: req.user.id, address: snapshot };
+      if (holdReason) {
+        routing.hold(d, orderId, holdReason);
+        notify.orderUpdate(d, o, 'Thank you! We have received your order and are checking a few details before sending it.');
+      } else {
+        const seller = d.prepare('SELECT * FROM sellers WHERE id = ?').get(p.sellerId);
+        const reason = q.speed === 'express' ? 'Express from a Bazaario city store'
+          : seller.lane === 'direct' ? 'Bazaario warehouse has stock'
+            : seller.fulfilment === 'fulfilled' ? `${seller.display_name}'s stock in the Bazaario warehouse` : `Best offer from ${seller.display_name}`;
+        routing.assign(d, orderId, p.sellerId, reason, now);
+        const at = p.promisedAt || q.promisedAt;
+        const when = !at ? '' : q.speed === 'express' ? ` by ${fmtTime(at)}` : ` by ${fmtTime(at).split(',').slice(0, 2).join(',')}`;
+        const lead = routing.handledByBazaario(seller) ? 'Your order is confirmed' : 'We have received your order';
+        notify.orderUpdate(d, o, `Thank you! ${lead} and it will arrive${when}.${packs.length > 1 ? ` It is package ${i + 1} of ${packs.length}.` : ''}`);
+      }
+      orders.push({ id: orderId, orderNo: no });
+    });
     d.prepare('DELETE FROM cart_items WHERE user_id = ? AND saved_for_later = 0').run(req.user.id);
-    // Payment and the COD risk check passed above, so the order is confirmed straight away.
-    event(d, orderId, 'placed');
-    event(d, orderId, 'confirmed', method === 'cod' ? 'Cash on Delivery' : `Paid by ${method.toUpperCase()}`);
-    const when = q.speed === 'express' ? `by ${fmtTime(q.promisedAt)}` : `by ${fmtTime(q.promisedAt).split(',').slice(0, 2).join(',')}`;
-    notify.orderUpdate(d, { id: orderId, order_no: no, user_id: req.user.id, address: snapshot },
-      `Thank you! Your order is confirmed and will arrive ${when}.`);
-    return { orderId, orderNo: no, total: q.total };
+    return { orderId: orders[0].id, orderNo: orders[0].orderNo, checkoutRef, orders, total: q.total };
   });
-  audit(req, 'order.place', result);
+  audit(req, 'order.place', { checkoutRef: result.checkoutRef, orders: result.orders.map((o) => o.id), total: result.total });
   res.status(201).json(result);
 });
 
@@ -108,15 +156,23 @@ function loadOrder(userId, id, isAdmin = false) {
   o.items = db.get().prepare(ITEMS_SQL).all(id);
   o.events = db.get().prepare('SELECT status, note, created_at FROM order_events WHERE order_id = ? ORDER BY id').all(id);
   o.return = db.get().prepare('SELECT reason, comment, refund_to, status, note, created_at, updated_at FROM returns WHERE order_id = ?').get(id) || null;
+  const seller = o.seller_id ? db.get().prepare('SELECT * FROM sellers WHERE id = ?').get(o.seller_id) : null;
+  o.seller = seller ? market.publicSeller(seller) : null;
+  o.packages = o.checkout_ref ? db.get().prepare('SELECT COUNT(*) AS n FROM orders WHERE checkout_ref = ?').get(o.checkout_ref).n : 1;
+  // Buyers see that the order is being checked, not the risk rule that held it.
+  if (!isAdmin) o.hold_reason = o.hold_reason ? 'review' : null;
   delete o.idempotency_key;
   return o;
 }
 
 router.get('/orders', (req, res) => {
+  const ref = typeof req.query.ref === 'string' && /^CK-[0-9A-F]{12}$/.test(req.query.ref) ? req.query.ref : null;
   const orders = db.get().prepare(
-    `SELECT id, order_no, status, total, payment_method, payment_status, delivery_speed, promised_at, created_at, delivered_at
-       FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 100`
-  ).all(req.user.id);
+    `SELECT o.id, o.order_no, o.status, o.total, o.payment_method, o.payment_status, o.delivery_speed, o.promised_at, o.created_at,
+            o.delivered_at, o.checkout_ref, o.hold_reason IS NOT NULL AS on_hold, s.display_name AS seller_name
+       FROM orders o LEFT JOIN sellers s ON s.id = o.seller_id
+      WHERE o.user_id = ? ${ref ? 'AND o.checkout_ref = ?' : ''} ORDER BY o.created_at DESC, o.id LIMIT 100`
+  ).all(req.user.id, ...(ref ? [ref] : []));
   const items = db.get().prepare(ITEMS_SQL);
   for (const o of orders) o.items = items.all(o.id);
   res.json({ orders });
@@ -124,6 +180,17 @@ router.get('/orders', (req, res) => {
 
 router.get('/orders/:id', (req, res) => {
   res.json({ order: loadOrder(req.user.id, v.int(req.params.id, 'Order', { min: 1 })) });
+});
+
+// GST invoice from the seller, once the order has shipped.
+router.get('/orders/:id/invoice', (req, res) => {
+  const id = v.int(req.params.id, 'Order', { min: 1 });
+  const o = db.get().prepare('SELECT status FROM orders WHERE id = ? AND user_id = ?').get(id, req.user.id);
+  if (!o) throw new HttpError(404, 'Order not found.');
+  if (!['shipped', 'out_for_delivery', 'delivery_failed', 'delivered', 'return_requested', 'returned'].includes(o.status)) {
+    throw new HttpError(400, 'The invoice is ready once your order ships.');
+  }
+  res.json({ invoice: invoice(db.get(), id) });
 });
 
 router.post('/orders/:id/cancel', (req, res) => {
@@ -183,6 +250,7 @@ router.post('/orders/:id/return', (req, res) => {
     d.prepare("UPDATE orders SET status = 'return_requested', updated_at = ? WHERE id = ?").run(now, id);
     event(d, id, 'return_requested', reason);
     notify.orderUpdate(d, o, 'We have received your return request. We will confirm the pickup shortly.');
+    if (o.seller_id) market.refreshScore(d, o.seller_id);
   });
   audit(req, 'order.return_request', { orderId: id });
   res.json({ order: loadOrder(req.user.id, id) });

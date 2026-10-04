@@ -43,7 +43,9 @@ function createApp() {
   });
 
   // Product photo uploads are larger than any other request; everything else keeps the 50 KB cap.
-  app.use('/api/admin/uploads', express.json({ limit: '3mb' }));
+  app.use(['/api/admin/uploads', '/api/seller/uploads'], express.json({ limit: '3mb' }));
+  // A bulk price and stock sheet from Seller Hub can be larger than other requests.
+  app.use('/api/seller/offers/bulk', express.json({ limit: '300kb' }));
   app.use(express.json({ limit: '50kb' }));
   app.use(cookieParser());
 
@@ -78,6 +80,8 @@ function createApp() {
   api.use('/', require('./src/routes/catalog'));
   api.use('/', require('./src/routes/support'));
   api.use('/', require('./src/routes/orders').router);
+  api.use('/seller', require('./src/routes/seller'));
+  api.use('/admin', require('./src/routes/admin-market'));
   api.use('/admin', require('./src/routes/admin'));
   api.use('/', require('./src/routes/shopping'));
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found.')));
@@ -101,7 +105,7 @@ function createApp() {
   // Central error handler: never leaks stack traces or SQL errors to clients.
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
-    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...(err.details ? { details: err.details } : {}) });
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Request too large.' });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed request.' });
     console.error(err);

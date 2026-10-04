@@ -2,12 +2,15 @@
 const express = require('express');
 const db = require('../db');
 const delivery = require('../delivery');
+const market = require('../market');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 const router = express.Router();
 
+// p.express is shown only while Bazaario Direct has the best offer: Express comes from our own city stores.
 const PRODUCT_COLS = `p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.sold_count,
-  p.emoji, p.color, p.image, p.express, p.is_deal, c.slug AS category, c.name AS category_name`;
+  p.emoji, p.color, p.image, (p.express AND p.seller_id = (SELECT id FROM sellers WHERE code = 'direct')) AS express, p.is_deal,
+  p.assured, p.offer_count, c.slug AS category, c.name AS category_name`;
 
 const SORTS = {
   relevance: 'p.is_deal DESC, p.sold_count DESC',
@@ -48,7 +51,8 @@ router.get('/products', (req, res) => {
   if (minPrice !== undefined) { where.push('p.price >= ?'); params.push(minPrice * 100); }
   if (maxPrice !== undefined) { where.push('p.price <= ?'); params.push(maxPrice * 100); }
   if (minRating !== undefined) { where.push('p.rating_avg >= ?'); params.push(minRating); }
-  if (req.query.express === '1') where.push('p.express = 1');
+  if (req.query.express === '1') where.push("p.express = 1 AND p.seller_id = (SELECT id FROM sellers WHERE code = 'direct')");
+  if (req.query.assured === '1') where.push('p.assured = 1');
   if (req.query.deals === '1') where.push('p.is_deal = 1');
   if (req.query.instock === '1') where.push('p.stock > 0');
 
@@ -88,18 +92,37 @@ router.get('/products/suggest', (req, res) => {
 router.get('/delivery', (req, res) => {
   const pincode = v.pincode(req.query.pincode);
   const ids = typeof req.query.products === 'string' ? req.query.products.split(',').slice(0, 50).map(Number).filter(Number.isInteger) : [];
+  const d = db.get();
   const products = ids.length
-    ? db.get().prepare(`SELECT id, express FROM products WHERE active = 1 AND id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+    ? d.prepare(`SELECT p.id, p.express, p.best_offer_id FROM products p WHERE p.active = 1 AND p.id IN (${ids.map(() => '?').join(',')})`).all(...ids)
     : [];
-  res.json(delivery.options(pincode, products));
+  // The promise follows the best offer: its seller's dispatch time, and Express only from Bazaario's own stock.
+  let extra = 0;
+  for (const p of products) {
+    const o = p.best_offer_id ? market.offerById(d, p.best_offer_id) : null;
+    if (!o || o.lane !== 'direct') p.express = 0;
+    if (o) extra = Math.max(extra, market.extraDays(o));
+  }
+  res.json(delivery.options(pincode, products, Date.now(), extra));
 });
 
 router.get('/products/:id', (req, res) => {
   const id = v.int(req.params.id, 'Product id', { min: 1 });
-  const p = db.get().prepare(`SELECT ${PRODUCT_COLS}, p.description, p.features FROM products p
+  const p = db.get().prepare(`SELECT ${PRODUCT_COLS}, p.description, p.features, p.specs, p.origin, p.manufacturer FROM products p
      JOIN categories c ON c.id = p.category_id WHERE p.id = ? AND p.active = 1`).get(id);
   if (!p) throw new HttpError(404, 'Product not found.');
   p.features = JSON.parse(p.features);
+  p.specs = JSON.parse(p.specs);
+
+  // Every seller's offer on this page, best first (blueprint stage 4: best offer, then other sellers).
+  const ranked = market.rankOffers(market.offersFor(db.get(), id));
+  const sellerRow = db.get().prepare('SELECT * FROM sellers WHERE id = ?');
+  const offers = ranked.map((o) => ({
+    id: o.id, price: o.price, stock: o.stock, dispatchDays: o.dispatch_days, bestBefore: o.best_before, assured: market.isAssured(o, o),
+    extraDays: market.extraDays(o), express: o.lane === 'direct' && !!p.express, seller: market.publicSeller(sellerRow.get(o.seller_id)),
+  }));
+  p.offers = offers;
+  p.authentic = market.isAuthenticCategory(p.category);
 
   const dist = db.get().prepare('SELECT rating, COUNT(*) AS n FROM reviews WHERE product_id = ? GROUP BY rating').all(id);
   const reviews = db.get().prepare(

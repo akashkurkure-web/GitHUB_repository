@@ -3,6 +3,8 @@ const express = require('express');
 const config = require('../config');
 const db = require('../db');
 const { quote } = require('../pricing');
+const market = require('../market');
+const { INDIAN_STATES } = require('../states');
 const { HttpError, requireAuth, v } = require('../security');
 
 const router = express.Router();
@@ -26,19 +28,40 @@ function productForCart(productId) {
   return p;
 }
 
+/** A specific seller's offer, picked under "Other sellers" on the product page. */
+function offerForCart(productId, offerId) {
+  const o = market.offerById(db.get(), offerId);
+  if (!o || o.product_id !== productId || !o.active || o.status !== 'approved') throw new HttpError(404, 'This seller no longer sells this item.');
+  return o;
+}
+
+/** Stock available for a bag line: from the chosen seller, or else the best offer. */
+function lineStock(userId, productId) {
+  const row = db.get().prepare('SELECT offer_id FROM cart_items WHERE user_id = ? AND product_id = ?').get(userId, productId);
+  if (row && row.offer_id) {
+    const o = market.offerById(db.get(), row.offer_id);
+    if (o && o.active && o.status === 'approved') return o.stock;
+  }
+  return productForCart(productId).stock;
+}
+
 router.get('/cart', (req, res) => res.json(cartView(req.user.id)));
 
 router.post('/cart', (req, res) => {
   const productId = v.int(req.body.productId, 'Product', { min: 1 });
   const qty = v.int(req.body.qty, 'Quantity', { min: 1, max: config.maxQtyPerItem, optional: true, def: 1 });
   const p = productForCart(productId);
-  const existing = db.get().prepare('SELECT qty FROM cart_items WHERE user_id = ? AND product_id = ?').get(req.user.id, productId);
-  const newQty = ((existing && existing.qty) || 0) + qty;
+  const offerId = v.int(req.body.offerId, 'Seller offer', { min: 1, optional: true });
+  const stock = offerId ? offerForCart(productId, offerId).stock : p.stock;
+  const existing = db.get().prepare('SELECT qty, offer_id FROM cart_items WHERE user_id = ? AND product_id = ?').get(req.user.id, productId);
+  // Picking a different seller replaces the line instead of adding to it.
+  const sameOffer = existing && (existing.offer_id || null) === (offerId || null);
+  const newQty = (sameOffer ? existing.qty : 0) + qty;
   if (newQty > config.maxQtyPerItem) throw new HttpError(400, `You can buy at most ${config.maxQtyPerItem} units of this item.`);
-  if (newQty > p.stock) throw new HttpError(400, p.stock ? `Only ${p.stock} left in stock.` : 'This item is currently out of stock.');
-  db.get().prepare(`INSERT INTO cart_items (user_id, product_id, qty, saved_for_later, added_at) VALUES (?,?,?,0,?)
-    ON CONFLICT(user_id, product_id) DO UPDATE SET qty = excluded.qty, saved_for_later = 0`)
-    .run(req.user.id, productId, newQty, Date.now());
+  if (newQty > stock) throw new HttpError(400, stock ? `Only ${stock} left in stock.` : 'This item is currently out of stock.');
+  db.get().prepare(`INSERT INTO cart_items (user_id, product_id, qty, saved_for_later, added_at, offer_id) VALUES (?,?,?,0,?,?)
+    ON CONFLICT(user_id, product_id) DO UPDATE SET qty = excluded.qty, saved_for_later = 0, offer_id = excluded.offer_id`)
+    .run(req.user.id, productId, newQty, Date.now(), offerId || null);
   res.status(201).json(cartView(req.user.id));
 });
 
@@ -52,8 +75,8 @@ router.patch('/cart/:productId', (req, res) => {
   }
   if (req.body.qty !== undefined) {
     const qty = v.int(req.body.qty, 'Quantity', { min: 1, max: config.maxQtyPerItem });
-    const p = productForCart(productId);
-    if (qty > p.stock) throw new HttpError(400, `Only ${p.stock} left in stock.`);
+    const stock = lineStock(req.user.id, productId);
+    if (qty > stock) throw new HttpError(400, `Only ${stock} left in stock.`);
     db.get().prepare('UPDATE cart_items SET qty = ? WHERE user_id = ? AND product_id = ?').run(qty, req.user.id, productId);
   }
   res.json(cartView(req.user.id));
@@ -110,14 +133,6 @@ router.delete('/wishlist/:productId', (req, res) => {
 });
 
 // ---------------- Addresses ----------------
-const INDIAN_STATES = [
-  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
-  'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
-  'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
-  'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
-  'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-];
-
 function readAddress(body) {
   const state = v.str(body.state, 'State', { max: 60 });
   if (!INDIAN_STATES.includes(state)) throw new HttpError(400, 'Please choose a valid state.');

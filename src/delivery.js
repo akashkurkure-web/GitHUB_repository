@@ -46,15 +46,16 @@ function standardPromise(days, now = Date.now()) {
 /**
  * Delivery options for a PIN code and a set of products.
  * Express is offered only when every product is an Express product and the PIN code is in an Express city.
+ * `extraDays` adds the seller's dispatch time (and economy shipping for Value sellers) to the Standard promise.
  */
-function options(pincode, products = [], now = Date.now()) {
+function options(pincode, products = [], now = Date.now(), extraDays = 0) {
   const z = zoneOf(pincode);
   const allExpress = products.length > 0 && products.every((p) => p.express);
   const list = [];
   if (z.zone === 'metro' && allExpress) {
     list.push({ speed: 'express', label: 'Express', promisedAt: expressPromise(now), fee: config.expressFee });
   }
-  list.push({ speed: 'standard', label: 'Standard', promisedAt: standardPromise(z.days, now), fee: null });
+  list.push({ speed: 'standard', label: 'Standard', promisedAt: standardPromise(z.days + extraDays, now), fee: null });
   return { pincode: String(pincode), zone: z.zone, city: z.city || null, cod: z.cod, options: list };
 }
 

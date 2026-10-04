@@ -1,13 +1,13 @@
 'use strict';
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
 const express = require('express');
-const config = require('../config');
 const db = require('../db');
 const { loadOrder } = require('./orders');
 const { FLOW, move, event } = require('../fulfilment');
 const notify = require('../notify');
+const { saveProductPhoto } = require('../uploads');
+const { readDetails } = require('../listing');
+const market = require('../market');
+const routing = require('../routing');
 const { HttpError, requireAdmin, audit, v } = require('../security');
 
 const router = express.Router();
@@ -26,92 +26,82 @@ router.get('/stats', (_req, res) => {
     customers: d.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'").get().n,
     products: d.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1').get().n,
     lowStock: d.prepare('SELECT id, title, stock FROM products WHERE active = 1 AND stock < 20 ORDER BY stock LIMIT 10').all(),
+    held: d.prepare("SELECT COUNT(*) AS n FROM orders WHERE hold_reason IS NOT NULL AND status = 'placed'").get().n,
+    sellerApplications: d.prepare("SELECT COUNT(*) AS n FROM sellers WHERE status = 'pending'").get().n,
+    qcQueue: d.prepare("SELECT COUNT(*) AS n FROM products WHERE qc_status = 'pending'").get().n,
+    claims: d.prepare("SELECT COUNT(*) AS n FROM claims WHERE status = 'open'").get().n,
+    sellers: d.prepare("SELECT COUNT(*) AS n FROM sellers WHERE status = 'approved' AND lane != 'direct'").get().n,
   });
 });
 
 // ---------- Products ----------
-// A product photo is a link to an https image, a photo uploaded below, or (demo build only) an inline image.
-function readImage(val) {
-  if (val === undefined || val === null || val === '') return '';
-  if (typeof val !== 'string') throw new HttpError(400, 'Photo must be a link.');
-  const s = val.trim();
-  if (/^\/uploads\/products\/[a-z0-9-]+\.(jpg|png|webp)$/.test(s)) return s;
-  if (/^img\/products\/[a-z0-9-]+\.svg$/.test(s)) return s;
-  if (config.inlineImages && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s) && s.length < config.maxImageBytes * 1.4) return s;
-  let url;
-  try { url = new URL(s); } catch { throw new HttpError(400, 'Photo link is not a valid web address.'); }
-  if (url.protocol !== 'https:' || s.length > 1000) throw new HttpError(400, 'Photo link must start with https:// and be under 1,000 characters.');
-  return url.href;
-}
-
-const IMAGE_TYPES = [
-  { ext: 'jpg', mime: 'image/jpeg', test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { ext: 'png', mime: 'image/png', test: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
-  { ext: 'webp', mime: 'image/webp', test: (b) => b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' },
-];
-
-// Upload a product photo (sent as a data URL). The file type is checked from its bytes, not its name.
+// Upload a product photo (sent as a data URL).
 router.post('/uploads', (req, res) => {
-  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(typeof req.body.dataUrl === 'string' ? req.body.dataUrl : '');
-  if (!m) throw new HttpError(400, 'Please choose a JPG, PNG or WebP photo.');
-  const bytes = Buffer.from(m[1], 'base64');
-  if (bytes.length > config.maxImageBytes) throw new HttpError(413, 'Photo is too large. Please use one under 2 MB.');
-  const type = IMAGE_TYPES.find((t) => bytes.length > 12 && t.test(bytes));
-  if (!type) throw new HttpError(400, 'Please choose a JPG, PNG or WebP photo.');
-  let url;
-  if (config.inlineImages) {
-    url = `data:${type.mime};base64,${bytes.toString('base64')}`;
-  } else {
-    const dir = path.join(config.uploadDir, 'products');
-    fs.mkdirSync(dir, { recursive: true });
-    const name = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}.${type.ext}`;
-    fs.writeFileSync(path.join(dir, name), bytes);
-    url = `/uploads/products/${name}`;
-  }
-  audit(req, 'admin.photo_upload', { bytes: bytes.length });
+  const { url, bytes } = saveProductPhoto(req.body.dataUrl);
+  audit(req, 'admin.photo_upload', { bytes });
   res.status(201).json({ url });
 });
+
+// Studio edits a product's page and Bazaario Direct's own offer on it (price and stock).
 function readProduct(body) {
-  const price = v.int(body.price, 'Price (₹)', { min: 1, max: 10_000_000 });
-  const mrp = v.int(body.mrp, 'MRP (₹)', { min: 1, max: 10_000_000 });
-  if (price > mrp) throw new HttpError(400, 'Selling price cannot be higher than MRP.');
-  const categoryId = v.int(body.categoryId, 'Category', { min: 1 });
-  if (!db.get().prepare('SELECT 1 FROM categories WHERE id = ?').get(categoryId)) throw new HttpError(400, 'Unknown category.');
-  const features = Array.isArray(body.features) ? body.features : String(body.features || '').split('\n');
+  const details = readDetails(body);
+  const price = v.int(body.price, 'Price (₹)', { min: 1, max: 10_000_000 }) * 100;
+  if (price > details.mrp) throw new HttpError(400, 'Selling price cannot be higher than MRP.');
   return {
-    title: v.str(body.title, 'Title', { min: 3, max: 200 }),
-    brand: v.str(body.brand, 'Brand', { min: 1, max: 60 }),
-    category_id: categoryId,
-    description: v.str(body.description, 'Description', { max: 4000, optional: true }),
-    features: JSON.stringify(features.map((f) => String(f).trim()).filter(Boolean).slice(0, 15).map((f) => f.slice(0, 200))),
-    price: price * 100,
-    mrp: mrp * 100,
+    ...details,
+    price,
     stock: v.int(body.stock, 'Stock', { min: 0, max: 1_000_000 }),
     emoji: v.str(body.emoji, 'Icon', { max: 8, optional: true }) || '📦',
     color: v.str(body.color, 'Colour', { pattern: /^#[0-9a-fA-F]{6}$/, optional: true }) || '#e3e6e6',
-    image: readImage(body.image),
     express: body.express ? 1 : 0,
     is_deal: body.isDeal ? 1 : 0,
     active: body.active === false ? 0 : 1,
   };
 }
 
+/** Creates or updates Bazaario Direct's offer. A product only sellers stock gets one once Studio adds stock. */
+function saveDirectOffer(d, productId, price, stock) {
+  const dir = market.direct(d);
+  const now = Date.now();
+  const has = d.prepare('SELECT id FROM offers WHERE product_id = ? AND seller_id = ?').get(productId, dir.id);
+  if (has) d.prepare('UPDATE offers SET price = ?, stock = ?, active = 1, updated_at = ? WHERE id = ?').run(price, stock, now, has.id);
+  else if (stock > 0) {
+    d.prepare('INSERT INTO offers (product_id, seller_id, price, stock, dispatch_days, active, created_at, updated_at) VALUES (?,?,?,?,1,1,?,?)')
+      .run(productId, dir.id, price, stock, now, now);
+  }
+  market.syncProduct(d, productId);
+}
+
 router.get('/products', (req, res) => {
   const q = typeof req.query.q === 'string' ? `%${req.query.q.slice(0, 60)}%` : '%';
+  const dir = market.direct(db.get());
   res.json({
     products: db.get().prepare(
-      `SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id = p.category_id
-        WHERE p.title LIKE ? OR p.brand LIKE ? ORDER BY p.id DESC LIMIT 200`
-    ).all(q, q).map((p) => ({ ...p, features: JSON.parse(p.features) })),
+      `SELECT p.*, c.name AS category_name, p.price AS best_price, s.display_name AS best_seller,
+              COALESCE(o.price, p.price) AS price, COALESCE(o.stock, 0) AS stock
+         FROM products p JOIN categories c ON c.id = p.category_id
+         LEFT JOIN offers o ON o.product_id = p.id AND o.seller_id = ?
+         LEFT JOIN sellers s ON s.id = p.seller_id
+        WHERE (p.title LIKE ? OR p.brand LIKE ?) AND p.qc_status = 'approved' ORDER BY p.id DESC LIMIT 200`
+    ).all(dir.id, q, q).map((p) => ({ ...p, features: JSON.parse(p.features), specs: JSON.parse(p.specs) })),
   });
 });
 
 router.post('/products', (req, res) => {
   const p = readProduct(req.body);
-  const id = Number(db.get().prepare(`INSERT INTO products (title, brand, category_id, description, features, price, mrp, stock,
-      emoji, color, image, express, is_deal, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.express,
-      p.is_deal, p.active, Date.now()).lastInsertRowid);
+  const id = db.tx((d) => {
+    const pid = Number(d.prepare(`INSERT INTO products (title, brand, category_id, description, features, price, mrp, stock,
+        emoji, color, image, express, is_deal, active, hsn, gst_rate, origin, manufacturer, specs, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.express,
+        p.is_deal, p.active, p.hsn, p.gst_rate, p.origin, p.manufacturer, p.specs, Date.now()).lastInsertRowid);
+    const dir = market.direct(d);
+    const now = Date.now();
+    d.prepare('INSERT INTO offers (product_id, seller_id, price, stock, dispatch_days, active, created_at, updated_at) VALUES (?,?,?,?,1,1,?,?)')
+      .run(pid, dir.id, p.price, p.stock, now, now);
+    market.syncProduct(d, pid);
+    return pid;
+  });
   audit(req, 'admin.product_create', { productId: id });
   res.status(201).json({ id });
 });
@@ -119,11 +109,16 @@ router.post('/products', (req, res) => {
 router.put('/products/:id', (req, res) => {
   const id = v.int(req.params.id, 'Product', { min: 1 });
   const p = readProduct(req.body);
-  const r = db.get().prepare(`UPDATE products SET title=?, brand=?, category_id=?, description=?, features=?, price=?, mrp=?,
-      stock=?, emoji=?, color=?, image=?, express=?, is_deal=?, active=? WHERE id = ?`)
-    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.express,
-      p.is_deal, p.active, id);
-  if (!r.changes) throw new HttpError(404, 'Product not found.');
+  db.tx((d) => {
+    const r = d.prepare(`UPDATE products SET title=?, brand=?, category_id=?, description=?, features=?, mrp=?,
+        emoji=?, color=?, image=?, express=?, is_deal=?, active=?, hsn=?, gst_rate=?, origin=?, manufacturer=?, specs=? WHERE id = ?`)
+      .run(p.title, p.brand, p.category_id, p.description, p.features, p.mrp, p.emoji, p.color, p.image, p.express,
+        p.is_deal, p.active, p.hsn, p.gst_rate, p.origin, p.manufacturer, p.specs, id);
+    if (!r.changes) throw new HttpError(404, 'Product not found.');
+    // A seller's price may never be above MRP: offers left above a lowered MRP are paused until the seller fixes them.
+    d.prepare('UPDATE offers SET active = 0, updated_at = ? WHERE product_id = ? AND price > ?').run(Date.now(), id, p.mrp);
+    saveDirectOffer(d, id, p.price, p.stock);
+  });
   audit(req, 'admin.product_update', { productId: id });
   res.json({ ok: true });
 });
@@ -137,15 +132,29 @@ router.delete('/products/:id', (req, res) => {
 });
 
 // ---------- Orders (fulfilment workflow, blueprint stages 6-8) ----------
+// The order board shows who has each order and why it went there (blueprint stage 6).
 router.get('/orders', (req, res) => {
-  const status = typeof req.query.status === 'string' && FLOW[req.query.status] ? req.query.status : null;
+  routing.sweep();
+  const held = req.query.status === 'held';
+  const status = !held && typeof req.query.status === 'string' && FLOW[req.query.status] ? req.query.status : null;
+  const where = held ? "WHERE o.hold_reason IS NOT NULL AND o.status = 'placed'" : status ? 'WHERE o.status = ?' : '';
   const rows = db.get().prepare(
     `SELECT o.id, o.order_no, o.status, o.total, o.payment_method, o.payment_status, o.delivery_speed, o.promised_at, o.awb,
-       o.created_at, u.name AS customer, u.email,
+       o.created_at, o.hold_reason, o.route_reason, o.accept_by, o.checkout_ref, u.name AS customer, u.email,
+       s.display_name AS seller, s.lane AS seller_lane, s.fulfilment AS seller_fulfilment,
        (SELECT note FROM order_events e WHERE e.order_id = o.id AND e.status = 'reattempt_requested' ORDER BY e.id DESC LIMIT 1) AS reattempt
-       FROM orders o JOIN users u ON u.id = o.user_id ${status ? 'WHERE o.status = ?' : ''} ORDER BY o.created_at DESC LIMIT 200`
+       FROM orders o JOIN users u ON u.id = o.user_id LEFT JOIN sellers s ON s.id = o.seller_id
+       ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT 200`
   ).all(...(status ? [status] : []));
   res.json({ orders: rows, transitions: FLOW });
+});
+
+// A held order was checked and is fine: send it to its seller.
+router.post('/orders/:id/release', (req, res) => {
+  const id = v.int(req.params.id, 'Order', { min: 1 });
+  db.tx((d) => routing.release(d, id));
+  audit(req, 'admin.order_release', { orderId: id });
+  res.json({ order: loadOrder(null, id, true) });
 });
 
 router.get('/orders/:id', (req, res) => {
