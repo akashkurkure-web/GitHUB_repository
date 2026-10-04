@@ -30,6 +30,7 @@ function readImage(val) {
   if (typeof val !== 'string') throw new HttpError(400, 'Photo must be a link.');
   const s = val.trim();
   if (/^\/uploads\/products\/[a-z0-9-]+\.(jpg|png|webp)$/.test(s)) return s;
+  if (/^img\/products\/[a-z0-9-]+\.svg$/.test(s)) return s;
   if (config.inlineImages && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s) && s.length < config.maxImageBytes * 1.4) return s;
   let url;
   try { url = new URL(s); } catch { throw new HttpError(400, 'Photo link is not a valid web address.'); }
