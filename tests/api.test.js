@@ -241,3 +241,18 @@ test('password change signs out other sessions', async () => {
   assert.equal((await b.call('GET', '/cart')).status, 401);
   assert.equal((await a.call('GET', '/cart')).status, 200);
 });
+
+test('installable app: manifest, icons and service worker are served', async () => {
+  const root = base.replace(/\/api$/, '');
+  const m = await fetch(`${root}/manifest.webmanifest`);
+  assert.equal(m.status, 200);
+  assert.match(m.headers.get('content-type'), /application\/manifest\+json/);
+  const manifest = await m.json();
+  assert.equal(manifest.display, 'standalone');
+  for (const icon of manifest.icons) assert.equal((await fetch(`${root}/${icon.src}`)).status, 200);
+  assert.ok(manifest.icons.some((i) => i.sizes === '512x512' && i.purpose === 'maskable'));
+  const sw = await fetch(`${root}/sw.js`);
+  assert.equal(sw.status, 200);
+  assert.equal(sw.headers.get('cache-control'), 'no-cache');
+  assert.equal((await fetch(`${root}/offline.html`)).status, 200);
+});

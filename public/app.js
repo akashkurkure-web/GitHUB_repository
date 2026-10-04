@@ -57,7 +57,12 @@ async function api(method, path, body) {
   const opts = { method, headers: { Accept: 'application/json' }, credentials: 'same-origin' };
   if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   if (state.csrf && method !== 'GET') opts.headers['X-CSRF-Token'] = state.csrf;
-  const res = await fetch('/api' + path, opts);
+  let res;
+  try {
+    res = await fetch('/api' + path, opts);
+  } catch {
+    throw new Error('We could not reach Bazaario. Check your internet connection and try again.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
@@ -919,6 +924,47 @@ function viewPage(slug) {
   mount(h('div', { class: 'card prose' }, h('h1', null, p ? p[0] : 'Page not found'), h('p', null, p ? p[1] : 'The page you requested does not exist.')));
 }
 
+// ---------- Install as an app (Android, Windows, macOS) ----------
+let installPrompt = null; // Chrome/Edge hand us this event when the store can be installed
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (location.hash === '#/app') route();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  toast('Bazaario is installed. Open it from your home screen, Start menu or Dock.');
+  if (location.hash === '#/app') route();
+});
+window.addEventListener('offline', () => toast('You are offline. Prices, stock and orders will update when you reconnect.', true));
+window.addEventListener('online', () => { toast('Back online.'); route(); });
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => { /* site still works without it */ }));
+}
+
+function viewApp() {
+  document.title = 'Get the app - Bazaario';
+  const installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const steps = (title, items) => h('div', { class: 'card' }, h('h3', null, title), h('ol', null, items.map((t) => h('li', null, t))));
+  mount(h('div', { class: 'prose' },
+    h('div', { class: 'card' },
+      h('h1', null, 'Get the Bazaario app'),
+      h('p', null, installed
+        ? 'You are using the Bazaario app. Your bag, wishlist and orders stay in sync with the website.'
+        : 'Install Bazaario on your phone or computer. It opens in its own window with an icon on your home screen, Start menu or Dock, and needs no app store.'),
+      installPrompt && !installed ? h('button', { class: 'btn btn-primary', onclick: async () => {
+        const p = installPrompt;
+        installPrompt = null;
+        await p.prompt();
+        route();
+      } }, 'Install Bazaario') : null),
+    installed ? null : h('div', { class: 'app-steps' },
+      steps('Android', ['Open this site in Chrome.', 'Tap the three-dot menu, then Install app (or Add to Home screen).', 'Tap Install. Bazaario appears in your app drawer.']),
+      steps('Windows', ['Open this site in Microsoft Edge or Chrome.', 'Click the install icon at the right of the address bar (or the three-dot menu, then Apps, then Install this site as an app).', 'Click Install. Bazaario is added to the Start menu and can be pinned to the taskbar.']),
+      steps('Mac', ['In Safari (macOS Sonoma or later): choose File, then Add to Dock.', 'In Chrome or Edge: click the install icon in the address bar, then Install.', 'Bazaario opens from the Dock, Launchpad and Spotlight.']),
+      steps('iPhone and iPad', ['Open this site in Safari.', 'Tap Share, then Add to Home Screen.', 'Tap Add.']))));
+}
+
 // ---------------- Router ----------------
 async function route() {
   state.timers.forEach(clearInterval);
@@ -942,6 +988,7 @@ async function route() {
     addresses: () => viewAddresses(),
     admin: () => viewAdmin(query),
     page: () => viewPage(parts[1]),
+    app: () => viewApp(),
   };
   const view = routes[parts[0] || ''];
   if (!view) { viewPage('missing'); return; }

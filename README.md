@@ -45,6 +45,31 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 
 ---
 
+## 0a. Install it as an app (Android, Windows, Mac, iPhone)
+
+Bazaario is a Progressive Web App: one codebase that installs like a native app, with its own window, icon,
+app-switcher entry and offline screen. No app store is needed. Installing needs the site on **HTTPS**
+(Codespaces, Render and any production setup in Section 5 qualify; `http://localhost` also works for testing).
+Shoppers can also open **Get the app** in the footer (`#/app`) for these same steps.
+
+| Device | Steps |
+|---|---|
+| **Android** | Open the store in Chrome → three-dot menu → **Install app** (or *Add to Home screen*) → **Install** |
+| **Windows** | Open it in Edge or Chrome → click the install icon in the address bar → **Install**. It is added to the Start menu; right-click to pin it to the taskbar |
+| **Mac** | Safari (macOS Sonoma+): **File → Add to Dock**. Chrome/Edge: install icon in the address bar → **Install** |
+| **iPhone / iPad** | Safari → **Share** → **Add to Home Screen** |
+
+*Workaround if you need a listing in Google Play or the Microsoft Store:* go to <https://www.pwabuilder.com>, enter your live
+HTTPS store URL, and download the generated Android (Trusted Web Activity) or Windows (MSIX) package to upload to the store.
+For Google Play you also host the `assetlinks.json` file PWABuilder gives you at `public/.well-known/assetlinks.json`.
+
+What makes it installable: `public/manifest.webmanifest` (name, colours, icons, shortcuts), `public/icons/`,
+and `public/sw.js`, a service worker that caches the storefront files and shows `public/offline.html` when there is
+no connection. API responses (prices, stock, carts, orders) are never cached. After changing `styles.css` or `app.js`,
+bump `VERSION` in `public/sw.js` so installed apps pick up the change immediately.
+
+---
+
 ## 1. Feature map (marketplace parity)
 
 | Area | Features |
