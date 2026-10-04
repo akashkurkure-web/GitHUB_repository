@@ -77,13 +77,16 @@ bump `VERSION` in `public/sw.js` so installed apps pick up the change immediatel
 | **Header** | Delivery strip with PIN code, logo, rounded search with live suggestions and category scope, Account · Orders · Wishlist · Bag icons, category chips |
 | **Home** | Auto-rotating hero banners, category tiles, Today's Deals carousel, top rated, browsing history |
 | **Search / listing** | Keyword search, category, brand facets, price ranges & custom range, rating "& Up", Express delivery, deals, in-stock filters; 6 sort orders; pagination |
-| **Product page** | Price / MRP / % off, "Inclusive of all taxes", EMI, coupon offers, PIN-code delivery check, stock status, qty, Add to Cart, Buy Now, Wish List, feature bullets, related products |
+| **Product page** | Price / MRP / % off, "Inclusive of all taxes", EMI, coupon offers, PIN-code delivery promise (Express time, Standard date, COD), stock status, qty, Add to Cart, Buy Now, Wish List, feature bullets, related products |
 | **Reviews** | Star distribution, write review, one review per customer, **Verified Purchase** badge only for delivered orders |
 | **Cart** | Guest cart (merged into account on sign-in), qty change, delete, Save for later, free-delivery progress bar |
-| **Checkout** | Address book with Indian states & PIN validation, UPI / Card (Luhn + expiry) / Cash on Delivery (₹50,000 cap), coupons, free delivery over ₹499, savings summary, idempotent "Place order" (no double orders) |
-| **Orders** | Order history, details, tracking stepper (Placed → Packed → Shipped → Delivered), cancel (auto-refund + restock), 10-day return window, Buy it again |
-| **Account** | Profile, change password (signs out other devices), addresses, wish list |
-| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, low stock), order fulfilment workflow, product CRUD with photo upload, customers, coupons, security audit log |
+| **Delivery speeds** | Express in under 90 minutes in 8 partner cities for Express items (8 am to 7:30 pm IST), Standard in 2 to 7 days by zone, no COD on the islands (`src/delivery.js`) |
+| **Checkout** | Address book with Indian states & PIN validation, delivery speed choice, UPI / Card (Luhn + expiry) / no-cost EMI (₹3,000+) / Cash on Delivery with a risk check / Bazaario wallet, coupons, free delivery over ₹499, savings summary, idempotent "Place order" (no double orders) |
+| **Orders** | Order history, tracking stepper and timeline (Confirmed → Packed → Shipped → Out for delivery → Delivered), courier and tracking number, missed-delivery rescheduling, RTO after failed attempts, cancel until shipped (auto-refund + restock), SMS and email on every step, Buy it again |
+| **Returns and wallet** | Return with a reason inside 10 days, doorstep pickup, refund to the wallet (instant) or the original payment method, COD refunds to the wallet, wallet balance usable at checkout |
+| **Help centre** | Questions by topic, support requests with a 24-hour reply target, Grievance Officer complaints acknowledged at once and due in 30 days, policy pages (terms, privacy, returns, shipping, cancellation, grievance) |
+| **Account** | Profile, change password (signs out other devices), sign in with a mobile OTP, addresses, wish list, wallet, my requests |
+| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, failed deliveries, returns, late requests, low stock), order fulfilment workflow, returns queue, help desk inbox, outgoing messages, product CRUD with photo upload, customers, coupons, security audit log |
 
 ## 2. Security controls
 
@@ -181,8 +184,13 @@ The named volume `bazaario-data` keeps the database across upgrades.
    then `sudo certbot --nginx -d yourstore.in`.
    *Workaround:* **Caddy** does HTTPS automatically (`yourstore.in { reverse_proxy 127.0.0.1:3000 }`). You can also put **Cloudflare** in front with SSL mode "Full (strict)".
 5. **Backups:** schedule a daily copy of the database (e.g. cron: `sqlite3 data/bazaario.db ".backup /backups/bz-$(date +%F).db"`) to S3 or Blob storage.
-6. **Real payments.** Before taking money, replace `processPayment()` in `src/routes/orders.js` with a PCI-DSS compliant
-   gateway (**Razorpay**, **PayU**, **Cashfree** or **Stripe India**):
+6. **Test mode and real partners.** Out of the box, payments, courier tracking numbers and SMS/email run in **test mode**:
+   nothing is charged or sent, and Bazaario Studio shows a test-mode banner and lists every message under **Messages**.
+   Mobile OTP sign-in shows the code on screen in test mode, so it is switched **off** when `NODE_ENV=production` until a real
+   SMS partner is connected (`SMS_PROVIDER`). Also set `GRIEVANCE_OFFICER_NAME`, `GRIEVANCE_OFFICER_EMAIL`,
+   `GRIEVANCE_OFFICER_PHONE`, `GRIEVANCE_OFFICER_ADDRESS` and `COMPANY_NAME` before going live (see `.env.example`).
+   **Real payments.** Before taking money, add a PCI-DSS compliant gateway (**Razorpay**, **PayU**, **Cashfree** or **Stripe India**)
+   to `charge()` and `refund()` in `src/payments.js`, and set `PAYMENT_PROVIDER`:
    - create the order on the gateway server-side and open its hosted checkout/SDK in the browser (card data never touches your server);
    - mark the order `paid` **only** after verifying the gateway's webhook signature server-side;
    - add the gateway domains to the CSP in `server.js` (`script-src`, `frame-src`, `connect-src`).
@@ -211,15 +219,22 @@ src/config.js          Business rules (shipping threshold, COD limit, return win
 src/db.js              SQLite schema & transaction helper
 src/seed.js            Demo catalog (10 categories, 38 products), coupons, admin user
 src/security.js        Password hashing, sessions, CSRF, RBAC, validation, audit
-src/pricing.js         Server-side cart totals, coupons, shipping
+src/pricing.js         Server-side cart totals, coupons, shipping, Express fee, wallet, COD and EMI rules
+src/delivery.js        Delivery promise by PIN code (Express cities, Standard days by zone, COD areas)
+src/fulfilment.js      Order life cycle: status changes, timeline, refunds, restock, buyer messages
+src/payments.js        Payment gateway adapter (test mode today)
+src/notify.js          SMS and email outbox (test mode records messages)
+src/wallet.js          Bazaario wallet ledger
 src/routes/auth.js     Register, login, logout, profile, change password
 src/routes/catalog.js  Categories, search & facets, product detail, reviews
 src/routes/shopping.js Cart, save-for-later, guest-cart merge, wishlist, addresses
-src/routes/orders.js   Checkout quote, payment, place/cancel/return orders
+src/routes/orders.js   Checkout quote, place/cancel orders, missed-delivery rescheduling, returns, wallet
+src/routes/support.js  Help desk tickets for buyers and the Studio inbox
 src/routes/admin.js    Bazaario Studio (admin) APIs
 public/                Storefront SPA (index.html, app.js, styles.css)
 DESIGN.md              Design rules (colours, type, layout, vocabulary, checklist)
 tests/api.test.js      Integration & security tests (npm test)
+tests/buying-flow.test.js  Delivery promise, Express, EMI, failed delivery, returns, wallet, help desk, OTP, upgrade
 ```
 
 ## 7. Common customisations

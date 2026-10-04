@@ -2,6 +2,8 @@
 const config = require('./config');
 const db = require('./db');
 const { HttpError } = require('./security');
+const delivery = require('./delivery');
+const wallet = require('./wallet');
 
 /** Server-side source of truth for cart totals. Client-sent prices are never trusted. */
 function cartLines(userId) {
@@ -24,15 +26,45 @@ function couponDiscount(code, subtotal) {
   return { discount: Math.min(discount, subtotal), coupon: c.code.toUpperCase() };
 }
 
-function quote(userId, couponCode, paymentMethod) {
+/**
+ * Cash on Delivery check (blueprint stage 5): not on the islands, not above the COD limit, and paused for buyers
+ * whose earlier COD deliveries were refused.
+ */
+function codCheck(userId, pincode, payable) {
+  if (pincode && !delivery.zoneOf(pincode).cod) return { ok: false, reason: 'Cash on Delivery is not available for this PIN code.' };
+  if (payable > config.codMaxOrder) return { ok: false, reason: `Cash on Delivery is available for orders up to ₹${(config.codMaxOrder / 100).toLocaleString('en-IN')}.` };
+  const refused = db.get().prepare("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'rto' AND payment_method = 'cod'").get(userId).n;
+  if (refused >= config.codMaxRefusals) return { ok: false, reason: 'Cash on Delivery is paused on your account because earlier deliveries were refused. Please pay online.' };
+  return { ok: true, reason: '' };
+}
+
+/**
+ * Server-side price of the bag. `opts.pincode` decides which delivery speeds exist; `opts.speed` picks one;
+ * `opts.useWallet` spends wallet balance first. `payable` is what the chosen payment method must cover.
+ */
+function quote(userId, couponCode, paymentMethod, opts = {}) {
   const lines = cartLines(userId);
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const mrpTotal = lines.reduce((s, l) => s + l.mrp * l.qty, 0);
   const { discount, coupon } = couponDiscount(couponCode, subtotal);
   const shipping = subtotal === 0 || subtotal >= config.freeShippingThreshold ? 0 : config.shippingFee;
+  const promise = opts.pincode ? delivery.options(opts.pincode, lines) : null;
+  const speeds = promise ? promise.options : [];
+  const chosen = speeds.find((o) => o.speed === opts.speed) || speeds.find((o) => o.speed === 'standard') || null;
+  const speed = chosen ? chosen.speed : 'standard';
+  const expressFee = speed === 'express' ? config.expressFee : 0;
   const codFee = paymentMethod === 'cod' ? config.codFee : 0;
-  const total = subtotal - discount + shipping + codFee;
-  return { lines, subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, codFee, total };
+  const total = subtotal - discount + shipping + expressFee + codFee;
+  const walletBalance = wallet.balance(userId);
+  const walletApplied = opts.useWallet ? Math.min(walletBalance, total) : 0;
+  const payable = total - walletApplied;
+  return {
+    lines, subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, expressFee, codFee, total,
+    walletBalance, walletApplied, payable,
+    speed, promisedAt: chosen ? chosen.promisedAt : null, speeds,
+    cod: codCheck(userId, opts.pincode, payable),
+    emi: { ok: payable >= config.emiMinOrder, minOrder: config.emiMinOrder, months: config.emiMonths },
+  };
 }
 
-module.exports = { cartLines, quote, couponDiscount };
+module.exports = { cartLines, quote, couponDiscount, codCheck };

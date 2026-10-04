@@ -202,7 +202,7 @@ test('orders: cancel restocks; admin fulfilment; return window; verified review'
   await c.call('POST', '/cart', { productId: 20, qty: 1 });
   const o2 = (await c.call('POST', '/orders', { addressId, paymentMethod: 'cod' })).data;
   assert.equal((await admin.call('PATCH', `/admin/orders/${o2.orderId}`, { status: 'delivered' })).status, 400, 'cannot skip steps');
-  for (const s of ['packed', 'shipped', 'delivered']) {
+  for (const s of ['packed', 'shipped', 'out_for_delivery', 'delivered']) {
     assert.equal((await admin.call('PATCH', `/admin/orders/${o2.orderId}`, { status: s })).status, 200);
   }
   const delivered = (await c.call('GET', `/orders/${o2.orderId}`)).data.order;
@@ -214,7 +214,8 @@ test('orders: cancel restocks; admin fulfilment; return window; verified review'
   assert.equal(rv.data.verified, true);
   assert.equal((await c.call('POST', '/products/20/reviews', { rating: 4, title: 'Again', body: 'Trying to review twice.' })).status, 409);
 
-  assert.equal((await c.call('POST', `/orders/${o2.orderId}/return`)).data.order.status, 'return_requested');
+  assert.equal((await c.call('POST', `/orders/${o2.orderId}/return`)).status, 400, 'reason required');
+  assert.equal((await c.call('POST', `/orders/${o2.orderId}/return`, { reason: 'No longer needed' })).data.order.status, 'return_requested');
   const audit = (await admin.call('GET', '/admin/audit')).data.entries;
   assert.ok(audit.some((e) => e.action === 'order.return_request'));
 });

@@ -25,20 +25,38 @@ function h(tag, attrs, ...children) {
   }
   return el;
 }
+/** Replaces an element's content, skipping empty (null/false) parts and flattening lists. */
+const fill = (el, ...nodes) => el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false));
 const mount = (...nodes) => { app.replaceChildren(...nodes.flat().filter((n) => n !== null && n !== undefined && n !== false)); app.focus({ preventScroll: true }); };
 
 // ---------------- Formatting ----------------
 const inr = (paise) => '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: paise % 100 ? 2 : 0, maximumFractionDigits: 2 });
 const pct = (p) => Math.round(((p.mrp - p.price) / p.mrp) * 100);
-const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+// Bazaario runs on India time, whatever the device's own clock is set to.
+const TZ = 'Asia/Kolkata';
+const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-IN', { timeZone: TZ, day: 'numeric', month: 'long', year: 'numeric' });
+const istDay = (ts) => Math.floor((ts + 330 * 60000) / 86400000);
+const fmtWhen = (ts) => new Date(ts).toLocaleString('en-IN', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const deliveryDate = (express) => {
   const d = new Date(Date.now() + (express ? 1 : 4) * 86400000);
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 };
+/** "today by 4:30 pm", "tomorrow" or "by Thursday, 9 October", from a delivery promise. */
+function promiseText({ speed, promisedAt }) {
+  const d = new Date(promisedAt);
+  const days = istDay(promisedAt) - istDay(Date.now());
+  const time = d.toLocaleTimeString('en-IN', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+  if (speed === 'express') return `${days <= 0 ? 'today' : 'tomorrow'} by ${time}`;
+  return days === 1 ? 'tomorrow' : `by ${d.toLocaleDateString('en-IN', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' })}`;
+}
 const STATUS_LABEL = {
-  placed: 'Order placed', packed: 'Packed', shipped: 'Shipped', delivered: 'Delivered',
-  cancelled: 'Cancelled', return_requested: 'Return requested', returned: 'Returned & refunded',
+  placed: 'Order placed', confirmed: 'Confirmed', packed: 'Packed', shipped: 'Shipped', out_for_delivery: 'Out for delivery',
+  delivery_failed: 'Delivery attempt failed', delivered: 'Delivered', rto: 'Returned to Bazaario', cancelled: 'Cancelled',
+  return_requested: 'Return requested', returned: 'Returned and refunded',
+  reattempt_requested: 'New delivery time requested', return_pickup: 'Return pickup scheduled', return_rejected: 'Return not accepted',
 };
+const PAY_LABEL = { upi: 'UPI', card: 'Card', emi: 'Card EMI', cod: 'Cash on Delivery', wallet: 'Wallet' };
 
 function priceBlock(p, big) {
   return h('div', { class: 'pricing' + (big ? ' pricing-lg' : '') },
@@ -243,7 +261,7 @@ function productCard(p, { compact } = {}) {
       h('a', { class: 'title', href: url }, p.title),
       ratingChip(p),
       priceBlock(p),
-      h('div', { class: 'ship' }, p.express ? 'Delivery tomorrow' : `Free delivery by ${deliveryDate(false).split(',')[0]}`),
+      h('div', { class: 'ship' }, p.express ? 'Express delivery available' : `Free delivery by ${deliveryDate(false).split(',')[0]}`),
       p.stock === 0 ? h('div', { class: 'err' }, 'Out of stock') : p.stock < 10 ? h('div', { class: 'low' }, `Only ${p.stock} left`) : null,
       compact || p.stock === 0 ? null : h('button', { class: 'btn btn-outline btn-block', onclick: () => addToCart(p) }, 'Add to bag')));
 }
@@ -366,11 +384,17 @@ async function viewProduct(id) {
   const pin = store.get('pin', '');
   const pinIn = h('input', { value: pin, maxLength: 6, placeholder: 'Enter PIN code', inputMode: 'numeric', 'aria-label': 'Delivery PIN code' });
   const pinOut = h('div', { class: 'hint' });
-  const checkPin = () => {
+  const checkPin = async () => {
     if (!/^[1-9]\d{5}$/.test(pinIn.value)) { pinOut.className = 'err'; pinOut.textContent = 'Please enter a valid 6-digit PIN code.'; return; }
     store.set('pin', pinIn.value); renderHeader();
-    pinOut.className = 'ok';
-    pinOut.textContent = `Delivery to ${pinIn.value} by ${deliveryDate(p.express)}. Cash on Delivery available.`;
+    try {
+      const d = await api('GET', `/delivery?pincode=${pinIn.value}&products=${p.id}`);
+      pinOut.className = 'delivery-opts';
+      fill(pinOut,
+        d.options.map((o) => h('div', null, h('b', null, o.speed === 'express' ? 'Express: ' : 'Standard: '), cap(promiseText(o)),
+          o.speed === 'express' ? h('span', { class: 'muted' }, ` · ${inr(o.fee)} from a store in ${d.city}`) : h('span', { class: 'muted' }, p.price >= (state.config.freeShippingThreshold || 0) ? ' · Free delivery' : ''))),
+        h('div', { class: d.cod ? 'ok' : 'muted' }, d.cod ? 'Cash on Delivery available' : 'Cash on Delivery is not available for this PIN code'));
+    } catch (e) { pinOut.className = 'err'; pinOut.textContent = e.message; }
   };
   if (pin) setTimeout(checkPin);
 
@@ -430,7 +454,7 @@ async function viewProduct(id) {
           h('p', { class: 'muted small' }, `Inclusive of GST · or ${inr(Math.ceil(p.price / 12))}/month with no-cost EMI`),
           h('div', { class: 'stock-line' },
             p.stock > 0 ? h('span', { class: p.stock < 10 ? 'low' : 'ok' }, p.stock < 10 ? `Only ${p.stock} left` : 'In stock') : h('span', { class: 'err' }, 'Out of stock'),
-            h('span', { class: 'muted' }, p.express ? 'Delivery tomorrow' : `Free delivery by ${deliveryDate(false)}`)),
+            h('span', { class: 'muted' }, p.express ? `Express delivery in ${(state.config.expressCities || []).length} cities` : `Free delivery by ${deliveryDate(false)}`)),
           h('div', { class: 'pin-check' }, pinIn, h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: checkPin }, 'Check')),
           pinOut,
           p.stock > 0 ? h('div', { class: 'buy-actions' },
@@ -567,30 +591,14 @@ async function viewCheckout() {
   const [{ addresses }, cart] = await Promise.all([api('GET', '/addresses'), api('GET', '/cart')]);
   if (!cart.lines.length) { location.hash = '#/cart'; return; }
 
-  const sel = { addressId: (addresses.find((a) => a.is_default) || addresses[0] || {}).id, method: 'upi', coupon: '' };
+  const sel = { addressId: (addresses.find((a) => a.is_default) || addresses[0] || {}).id, method: 'upi', coupon: '', speed: 'standard', useWallet: false, emiMonths: 6 };
   const idempotencyKey = crypto.randomUUID();
   const summaryBox = h('div', { class: 'card summary' });
   const errBox = h('div', { class: 'alert alert-err hidden' });
-
-  const refreshQuote = async () => {
-    try {
-      const q = await api('POST', '/checkout/quote', { coupon: sel.coupon || undefined, paymentMethod: sel.method });
-      summaryBox.replaceChildren(
-        placeBtn,
-        h('p', { class: 'muted small center' }, 'By placing your order you agree to Bazaario\'s privacy notice and terms.'),
-        h('hr'), h('h3', null, 'Order summary'),
-        h('dl', null,
-          h('dt', null, 'Items:'), h('dd', null, inr(q.subtotal)),
-          h('dt', null, 'Delivery:'), h('dd', null, q.shipping ? inr(q.shipping) : 'FREE'),
-          q.discount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.discount))] : null,
-          h('dt', { class: 'total' }, 'To pay'), h('dd', { class: 'total' }, inr(q.total))),
-        q.savings > 0 ? h('p', { class: 'savings' }, `You save ${inr(q.savings)} on this order`) : null);
-      return true;
-    } catch (e) {
-      if (sel.coupon) { sel.coupon = ''; couponIn.value = ''; fail(e); return refreshQuote(); }
-      fail(e); return false;
-    }
-  };
+  const speedBox = h('div');
+  const walletBox = h('div');
+  const payBox = h('div');
+  const coversNote = h('p', { class: 'alert alert-ok hidden' }, 'Your wallet balance covers this order. No other payment is needed.');
 
   // Address step
   const addrList = h('div', null, addresses.map((a) => h('label', { class: 'addr-opt' + (a.id === sel.addressId ? ' sel' : '') },
@@ -598,6 +606,7 @@ async function viewCheckout() {
       sel.addressId = a.id;
       addrList.querySelectorAll('.addr-opt').forEach((x) => x.classList.remove('sel'));
       e.target.closest('.addr-opt').classList.add('sel');
+      refreshQuote();
     } }),
     h('span', null, h('b', null, a.full_name), ` ${a.line1}, ${a.line2 ? a.line2 + ', ' : ''}${a.city}, ${a.state}, ${a.pincode}, India · Phone: ${a.phone}`))));
   const newAddr = h('div', { class: addresses.length ? 'hidden' : '' }, addressForm(() => route()));
@@ -607,31 +616,102 @@ async function viewCheckout() {
     expiry: h('input', { placeholder: 'MM/YY', maxLength: 5, autocomplete: 'cc-exp' }),
     cvv: h('input', { type: 'password', inputMode: 'numeric', maxLength: 4, autocomplete: 'cc-csc', placeholder: 'CVV' }) };
   const upi = h('input', { placeholder: 'yourname@bank', maxLength: 100 });
+  const emiSel = h('select', { 'aria-label': 'EMI plan', onchange: () => { sel.emiMonths = Number(emiSel.value); } });
+  const cardFields = h('div', { class: 'pay-fields' }, h('label', null, 'Card number'), card.number,
+    h('div', { class: 'form-grid' }, h('div', null, h('label', null, 'Expiry'), card.expiry), h('div', null, h('label', null, 'CVV'), card.cvv)),
+    h('p', { class: 'hint' }, 'Only the last 4 digits of your card are kept.'));
   const payFields = {
     upi: h('div', { class: 'pay-fields' }, h('label', null, 'UPI ID'), upi, h('p', { class: 'hint' }, 'You will receive a payment request on your UPI app.')),
-    card: h('div', { class: 'pay-fields hidden' }, h('label', null, 'Card number'), card.number,
-      h('div', { class: 'form-grid' }, h('div', null, h('label', null, 'Expiry'), card.expiry), h('div', null, h('label', null, 'CVV'), card.cvv)),
-      h('p', { class: 'hint' }, 'Card details are validated and only the last 4 digits are kept. Demo mode — no real charge. Test card: 4111 1111 1111 1111')),
-    cod: h('div', { class: 'pay-fields hidden' }, h('p', { class: 'hint' }, 'Pay with cash or UPI when your order is delivered. Available for orders up to ₹50,000.')),
+    card: h('div'),
+    emi: h('div', { class: 'pay-fields' }, h('label', null, 'Choose a plan'), emiSel,
+      h('p', { class: 'hint' }, 'No-cost EMI: you pay the order price in equal monthly parts, with no interest. Pay with a credit card.')),
+    cod: h('div', { class: 'pay-fields' }, h('p', { class: 'hint' }, 'Pay with cash or UPI when your order is delivered.')),
   };
-  const payOpt = (m, label) => h('div', null, h('label', { class: 'inline' },
-    h('input', { type: 'radio', name: 'pay', value: m, checked: sel.method === m, onchange: () => {
-      sel.method = m;
-      Object.entries(payFields).forEach(([k, el]) => el.classList.toggle('hidden', k !== m));
-      refreshQuote();
-    } }), h('b', null, label)), payFields[m]);
+  const payReason = {};
+  const radios = {};
+  const showFields = () => {
+    Object.entries(payFields).forEach(([k, el]) => el.classList.toggle('hidden', k !== sel.method));
+    if (sel.method === 'card' || sel.method === 'emi') payFields[sel.method].append(cardFields); else cardFields.remove();
+  };
+  const payOpt = (m, label) => {
+    radios[m] = h('input', { type: 'radio', name: 'pay', value: m, checked: sel.method === m, onchange: () => { sel.method = m; showFields(); refreshQuote(); } });
+    payReason[m] = h('span', { class: 'hint muted' });
+    return h('div', null, h('label', { class: 'inline' }, radios[m], h('b', null, label), ' ', payReason[m]), payFields[m]);
+  };
+  payBox.append(
+    state.config.testMode && state.config.testMode.payments
+      ? h('p', { class: 'alert alert-test' }, 'Test mode: payments are simulated and no money is charged. Test card: 4111 1111 1111 1111.') : null,
+    payOpt('upi', 'UPI (Google Pay, PhonePe, Paytm and more)'), payOpt('card', 'Credit or debit card'),
+    payOpt('emi', 'No-cost EMI on credit card'), payOpt('cod', 'Cash on Delivery'));
+  showFields();
+
+  const paintSpeeds = (q) => {
+    if (!sel.addressId) { speedBox.replaceChildren(h('p', { class: 'muted' }, 'Add a delivery address to see delivery options.')); return; }
+    const fee = (o) => (o.speed === 'express' ? inr(o.fee) : q.shipping ? inr(q.shipping) : 'Free');
+    fill(speedBox,
+      q.speeds.map((o) => h('label', { class: 'addr-opt' + (o.speed === q.speed ? ' sel' : '') },
+        h('input', { type: 'radio', name: 'speed', checked: o.speed === q.speed, onchange: () => { sel.speed = o.speed; refreshQuote(); } }),
+        h('span', null, h('b', null, o.speed === 'express' ? 'Express' : 'Standard'), ` · ${cap(promiseText(o))} · ${fee(o)}`,
+          o.speed === 'express' ? h('div', { class: 'hint' }, 'From a Bazaario partner store near you.') : null))),
+      q.speeds.some((o) => o.speed === 'express') ? null
+        : h('p', { class: 'hint' }, `Express delivery in under 90 minutes is available in ${(state.config.expressCities || []).join(', ')} for items marked Express.`));
+  };
+
+  const paintWallet = (q) => {
+    if (!q.walletBalance) { walletBox.replaceChildren(); return; }
+    walletBox.replaceChildren(h('label', { class: 'addr-opt' + (sel.useWallet ? ' sel' : '') },
+      h('input', { type: 'checkbox', checked: sel.useWallet, onchange: (e) => { sel.useWallet = e.target.checked; refreshQuote(); } }),
+      h('span', null, h('b', null, 'Use Bazaario wallet'), ` · Balance ${inr(q.walletBalance)}`)));
+  };
+
+  const paintPay = (q) => {
+    const covered = q.payable === 0;
+    coversNote.classList.toggle('hidden', !covered);
+    payBox.classList.toggle('hidden', covered);
+    const block = (m, ok, why) => { radios[m].disabled = !ok; payReason[m].textContent = ok ? '' : why; };
+    block('cod', q.cod.ok, q.cod.reason);
+    block('emi', q.emi.ok, `Available on orders of ${inr(q.emi.minOrder)} and above.`);
+    emiSel.replaceChildren(...q.emi.months.map((m) => h('option', { value: m, selected: m === sel.emiMonths }, `${m} months · ${inr(Math.ceil(q.payable / m))} a month`)));
+    if (radios[sel.method].disabled) { sel.method = 'upi'; radios.upi.checked = true; showFields(); }
+  };
+
+  const refreshQuote = async () => {
+    try {
+      const q = await api('POST', '/checkout/quote', { addressId: sel.addressId, speed: sel.speed, useWallet: sel.useWallet, coupon: sel.coupon || undefined, paymentMethod: sel.method });
+      sel.speed = q.speed;
+      paintSpeeds(q); paintWallet(q); paintPay(q);
+      fill(summaryBox,
+        placeBtn,
+        h('p', { class: 'muted small center' }, 'By placing your order you agree to Bazaario\'s ', h('a', { href: '#/page/terms' }, 'terms'), ' and ', h('a', { href: '#/page/privacy' }, 'privacy notice'), '.'),
+        h('hr'), h('h3', null, 'Order summary'),
+        h('dl', null,
+          h('dt', null, 'Items:'), h('dd', null, inr(q.subtotal)),
+          h('dt', null, 'Delivery:'), h('dd', null, q.shipping ? inr(q.shipping) : 'Free'),
+          q.expressFee ? [h('dt', null, 'Express delivery:'), h('dd', null, inr(q.expressFee))] : null,
+          q.discount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.discount))] : null,
+          q.walletApplied ? [h('dt', null, 'Order total:'), h('dd', null, inr(q.total)), h('dt', null, 'From wallet:'), h('dd', { class: 'ok' }, '-' + inr(q.walletApplied))] : null,
+          h('dt', { class: 'total' }, 'To pay'), h('dd', { class: 'total' }, inr(q.payable))),
+        q.promisedAt ? h('p', { class: 'ok small' }, `Arrives ${promiseText({ speed: q.speed, promisedAt: q.promisedAt })}`) : null,
+        q.savings > 0 ? h('p', { class: 'savings' }, `You save ${inr(q.savings)} on this order`) : null);
+      return true;
+    } catch (e) {
+      if (sel.coupon) { sel.coupon = ''; couponIn.value = ''; fail(e); return refreshQuote(); }
+      fail(e); return false;
+    }
+  };
 
   const couponIn = h('input', { placeholder: 'Enter coupon code', maxLength: 20, style: { width: '200px' } });
 
   const placeBtn = h('button', { class: 'btn btn-primary btn-block', onclick: async () => {
     errBox.classList.add('hidden');
     if (!sel.addressId) { errBox.textContent = 'Please add a delivery address.'; errBox.classList.remove('hidden'); return; }
-    const payment = sel.method === 'card' ? { cardNumber: card.number.value, expiry: card.expiry.value, cvv: card.cvv.value }
+    const cardData = { cardNumber: card.number.value, expiry: card.expiry.value, cvv: card.cvv.value };
+    const payment = sel.method === 'card' ? cardData : sel.method === 'emi' ? { ...cardData, emiMonths: sel.emiMonths }
       : sel.method === 'upi' ? { upiId: upi.value } : {};
     placeBtn.disabled = true;
     placeBtn.textContent = 'Placing your order…';
     try {
-      const r = await api('POST', '/orders', { addressId: sel.addressId, paymentMethod: sel.method, coupon: sel.coupon || undefined, payment, idempotencyKey });
+      const r = await api('POST', '/orders', { addressId: sel.addressId, speed: sel.speed, useWallet: sel.useWallet, paymentMethod: sel.method, coupon: sel.coupon || undefined, payment, idempotencyKey });
       card.number.value = ''; card.cvv.value = '';
       await updateCartCount();
       location.hash = `#/orders/${r.orderId}?placed=1`;
@@ -639,6 +719,7 @@ async function viewCheckout() {
       errBox.textContent = e.message; errBox.classList.remove('hidden');
       placeBtn.disabled = false; placeBtn.textContent = 'Place your order';
       window.scrollTo(0, 0);
+      refreshQuote();
     }
   } }, 'Place your order');
 
@@ -651,32 +732,45 @@ async function viewCheckout() {
           addrList,
           addresses.length ? h('button', { class: 'link-btn', onclick: () => newAddr.classList.toggle('hidden') }, '+ Add a new address') : null,
           newAddr),
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '2'), 'How would you like to pay?'),
-          payOpt('upi', 'UPI (Google Pay, PhonePe, Paytm & more)'), payOpt('card', 'Credit or debit card'), payOpt('cod', 'Cash on Delivery / Pay on Delivery'),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '2'), 'When should it arrive?'), speedBox),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '3'), 'How would you like to pay?'),
+          walletBox, coversNote, payBox,
           h('hr'), h('label', null, 'Apply a coupon'),
           h('div', { style: { display: 'flex', gap: '8px' } }, couponIn, h('button', { class: 'btn', onclick: async () => {
             sel.coupon = couponIn.value.trim();
-            if (await refreshQuote() && sel.coupon) toast(`Coupon ${sel.coupon.toUpperCase()} applied!`);
+            if (await refreshQuote() && sel.coupon) toast(`Coupon ${sel.coupon.toUpperCase()} applied.`);
           } }, 'Apply')),
           h('p', { class: 'hint' }, 'Try WELCOME10, SAVE100 or FESTIVE15')),
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '3'), 'Your items'),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '4'), 'Your items'),
           cart.lines.map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
             h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
-              h('div', { class: 'ok' }, `Delivery: ${deliveryDate(l.express)}`)))))),
+              l.express ? h('div', { class: 'hint' }, 'Express item') : null))))),
       summaryBox));
   await refreshQuote();
 }
 
 // ---------- Orders ----------
+/** Where an order is in its journey, in one line. */
+function orderLine(o) {
+  if (o.status === 'delivered') return o.delivered_at ? `Delivered on ${fmtDate(o.delivered_at)}` : 'Delivered';
+  if (['confirmed', 'placed', 'packed', 'shipped', 'out_for_delivery'].includes(o.status) && o.promised_at) {
+    return `Arriving ${promiseText({ speed: o.delivery_speed, promisedAt: o.promised_at })}`;
+  }
+  if (o.status === 'delivery_failed') return 'We missed you. Choose a new delivery time.';
+  return '';
+}
+
 function orderCard(o) {
   return h('div', { class: 'order' },
     h('div', { class: 'order-head' },
       h('div', null, 'ORDER PLACED', h('b', null, fmtDate(o.created_at))),
       h('div', null, 'TOTAL', h('b', null, inr(o.total))),
-      h('div', null, 'PAYMENT', h('b', null, `${o.payment_method.toUpperCase()} · ${o.payment_status}`)),
-      h('div', { class: 'right' }, `ORDER ${o.order_no}`, h('b', null, h('a', { href: `#/orders/${o.id}` }, 'View details')))),
+      h('div', null, 'PAYMENT', h('b', null, `${PAY_LABEL[o.payment_method] || o.payment_method} · ${o.payment_status}`)),
+      h('div', { class: 'right' }, `ORDER ${o.order_no}`, h('b', null, h('a', { href: `#/orders/${o.id}` }, 'Track and manage')))),
     h('div', { class: 'order-body' },
-      h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
+      h('div', null, h('span', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
+        o.delivery_speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : null),
+      orderLine(o) ? h('div', { class: o.status === 'delivery_failed' ? 'low' : 'ok' }, orderLine(o)) : null,
       o.items.map((it) => h('div', { class: 'order-item' },
         h('a', { href: `#/p/${it.product_id}` }, pic(it, 'pimg')),
         h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'hint' }, `Qty ${it.qty} · ${inr(it.price)}`),
@@ -690,41 +784,126 @@ async function viewOrders() {
     orders.length ? orders.map(orderCard) : h('div', { class: 'card empty' }, h('h2', null, 'No orders yet'), h('p', null, 'When you place an order, you can track it here.'), h('a', { class: 'btn btn-primary', href: '#/' }, 'Start shopping')));
 }
 
+/** Newest updates first; long histories show the latest four with the rest folded away. */
+function timeline(events) {
+  const item = (e) => h('li', null, h('span', { class: 'hint muted' }, fmtWhen(e.created_at)),
+    h('b', null, STATUS_LABEL[e.status] || e.status), e.note ? h('span', { class: 'hint' }, e.note) : null);
+  const list = events.slice().reverse();
+  return [h('ol', { class: 'timeline' }, list.slice(0, 4).map(item)),
+    list.length > 4 ? h('details', { class: 'timeline-more' }, h('summary', null, `Show full history (${list.length - 4} earlier updates)`),
+      h('ol', { class: 'timeline' }, list.slice(4).map(item))) : null];
+}
+
+const RETURN_STATUS = {
+  requested: 'Return requested. We will confirm the pickup shortly.',
+  pickup_scheduled: 'Return approved. Our delivery partner will pick it up within 2 working days. Please keep the item packed with its tags.',
+  refunded: 'Return complete and refunded.',
+  rejected: 'We could not accept this return.',
+};
+
 async function viewOrder(id, params) {
   if (!state.user) { location.hash = '#/login'; return; }
   const { order: o } = await api('GET', `/orders/${encodeURIComponent(id)}`);
-  const steps = ['placed', 'packed', 'shipped', 'delivered'];
-  const reached = steps.indexOf(o.status);
-  const act = async (path, confirmMsg) => {
-    if (!(await askConfirm(confirmMsg, 'Yes, continue'))) return;
-    try { await api('POST', `/orders/${o.id}/${path}`); toast('Request submitted.'); route(); } catch (e) { fail(e); }
+  const express = o.delivery_speed === 'express';
+  const steps = express ? ['confirmed', 'packed', 'shipped', 'delivered'] : ['confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered'];
+  const stepLabel = (s) => (express && s === 'shipped' ? 'Rider on the way' : STATUS_LABEL[s]);
+  const at = { placed: 0, delivery_failed: steps.indexOf('out_for_delivery'), return_requested: steps.length - 1, returned: steps.length - 1 };
+  const reached = o.status in at ? at[o.status] : steps.indexOf(o.status);
+  const done = async (path, body, msg) => {
+    try { await api('POST', `/orders/${o.id}/${path}`, body); toast(msg); route(); } catch (e) { fail(e); }
   };
+
+  // Failed delivery: the buyer picks a new time (NDR).
+  const ndr = () => {
+    const when = h('select', null, h('option', { value: 'tomorrow' }, 'Tomorrow'), h('option', { value: 'evening' }, 'Tomorrow evening (after 5 pm)'), h('option', { value: 'weekend' }, 'This weekend'));
+    const note = h('input', { maxLength: 200, placeholder: 'For example: call before coming, leave with the guard' });
+    const asked = o.events.filter((e) => e.status === 'reattempt_requested').at(-1);
+    return h('div', { class: 'card ndr' }, h('h3', null, 'We could not deliver your order'),
+      h('p', null, 'Tell us when to come back. Our delivery partner will try again at that time.'),
+      asked ? h('p', { class: 'ok small' }, `Requested: ${asked.note}`) : null,
+      h('div', { class: 'form-grid' }, h('div', null, h('label', null, 'When should we try again?'), when), h('div', null, h('label', null, 'Note for the delivery partner (optional)'), note)),
+      h('button', { class: 'btn btn-primary', style: { marginTop: '10px' }, onclick: () => done('reattempt', { when: when.value, note: note.value }, 'Thanks. We will try again at the time you chose.') }, 'Request another attempt'),
+      h('p', { class: 'hint' }, 'After three failed attempts the order comes back to us and any payment is refunded.'));
+  };
+
+  // Return request form.
+  const windowOpen = o.status === 'delivered' && o.delivered_at && Date.now() - o.delivered_at < (state.config.returnWindowDays || 10) * 86400000;
+  const returnBox = h('div', { class: 'card hidden' });
+  const openReturn = async () => {
+    const { reasons } = await api('GET', '/returns/reasons');
+    const reason = h('select', { required: true }, h('option', { value: '' }, 'Choose a reason'), reasons.map((r) => h('option', { value: r }, r)));
+    const comment = h('textarea', { rows: 3, maxLength: 1000, placeholder: 'Anything that helps us, for example what is damaged' });
+    const cashLike = o.payment_method === 'cod' || o.payment_method === 'wallet';
+    let refundTo = 'wallet';
+    const refundOpt = (val, label, hint) => h('label', { class: 'inline' },
+      h('input', { type: 'radio', name: 'refund', value: val, checked: val === refundTo, onchange: () => { refundTo = val; } }), h('b', null, label), ' ', h('span', { class: 'hint muted' }, hint));
+    returnBox.replaceChildren(h('h3', null, 'Return items'),
+      h('form', { onsubmit: (e) => { e.preventDefault(); done('return', { reason: reason.value, comment: comment.value, refundTo }, 'Return requested.'); } },
+        h('label', null, 'Why are you returning this?'), reason, h('label', null, 'Details (optional)'), comment,
+        h('label', null, 'Where should the refund go?'),
+        cashLike ? h('p', { class: 'hint' }, 'Orders paid in cash or from the wallet are refunded to your Bazaario wallet, as soon as we receive the item.')
+          : [refundOpt('wallet', 'Bazaario wallet', 'instant, once we receive the item'), refundOpt('source', 'Original payment method', '5-7 working days')],
+        h('p', { class: 'hint' }, 'We pick the item up from your delivery address. Please pack it with its tags and accessories.'),
+        h('button', { class: 'btn btn-outline' }, 'Request return')));
+    returnBox.classList.remove('hidden');
+    returnBox.scrollIntoView();
+  };
+
   mount(
     new URLSearchParams(params).get('placed') ? h('div', { class: 'alert alert-ok' }, h('b', null, 'Thank you. Your order is confirmed.'),
-      ` Confirmation will be sent to ${state.user.email}. Order # ${o.order_no}`) : null,
+      ` We have sent the details to ${state.user.email}. Order # ${o.order_no}`) : null,
     h('p', null, h('a', { href: '#/orders' }, 'All orders')),
     h('h1', { class: 'page-title' }, 'Order details'),
     h('p', { class: 'muted' }, `Ordered on ${fmtDate(o.created_at)} | Order# ${o.order_no}`),
     h('div', { class: 'card' },
+      h('div', null, h('span', { class: `status ${o.status}` }, STATUS_LABEL[o.status]), express ? h('span', { class: 'speed-tag' }, 'Express') : null),
+      orderLine(o) ? h('div', { class: o.status === 'delivery_failed' ? 'low' : 'ok' }, orderLine(o)) : null,
+      o.awb ? h('p', { class: 'hint' }, `${o.courier} · Tracking number ${o.awb}`) : null,
+      reached >= 0 && !['cancelled', 'rto'].includes(o.status) ? h('div', { class: 'tracker' }, steps.map((s, i) => h('div', { class: i <= reached ? 'done' : '' }, stepLabel(s)))) : null,
+      timeline(o.events)),
+    o.status === 'delivery_failed' ? ndr() : null,
+    o.return ? h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', null, 'Your return'),
+      h('p', { class: o.return.status === 'rejected' ? 'low' : 'ok' }, RETURN_STATUS[o.return.status]),
+      h('p', { class: 'hint' }, `Reason: ${o.return.reason}${o.return.note ? ' · ' + o.return.note : ''}`),
+      h('p', { class: 'hint' }, `Refund to: ${o.return.refund_to === 'wallet' ? 'Bazaario wallet' : 'original payment method'}`)) : null,
+    h('div', { class: 'card', style: { marginTop: '16px' } },
       h('div', { class: 'form-grid' },
         h('div', null, h('h3', null, 'Delivering to'), h('div', null, o.address.fullName), h('div', null, o.address.line1),
           o.address.line2 ? h('div', null, o.address.line2) : null, h('div', null, `${o.address.city}, ${o.address.state} ${o.address.pincode}`), h('div', null, `Phone: ${o.address.phone}`)),
         h('div', { class: 'summary' }, h('h3', null, 'Payment summary'),
           h('dl', null,
             h('dt', null, 'Item(s) Subtotal:'), h('dd', null, inr(o.subtotal)),
-            h('dt', null, 'Shipping:'), h('dd', null, inr(o.shipping)),
+            h('dt', null, 'Delivery:'), h('dd', null, o.shipping ? inr(o.shipping) : 'Free'),
             o.discount ? [h('dt', null, `Promotion (${o.coupon_code}):`), h('dd', null, '-' + inr(o.discount))] : null,
-            h('dt', { class: 'total' }, 'Total paid'), h('dd', { class: 'total' }, inr(o.total))),
-          h('p', { class: 'hint' }, `Payment: ${o.payment_method.toUpperCase()} (${o.payment_status})${o.payment_ref ? ' · Ref ' + o.payment_ref : ''}`)))),
+            o.wallet_used ? [h('dt', null, 'Paid from wallet:'), h('dd', null, inr(o.wallet_used))] : null,
+            h('dt', { class: 'total' }, 'Order total'), h('dd', { class: 'total' }, inr(o.total))),
+          h('p', { class: 'hint' }, `Payment: ${PAY_LABEL[o.payment_method] || o.payment_method}${o.emi_months ? ` (${o.emi_months} months)` : ''} · ${o.payment_status}${o.payment_ref ? ' · Ref ' + o.payment_ref : ''}`)))),
     h('div', { class: 'card', style: { marginTop: '16px' } },
-      h('div', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
-      reached >= 0 ? h('div', { class: 'tracker' }, steps.map((s, i) => h('div', { class: i <= reached ? 'done' : '' }, STATUS_LABEL[s]))) : null,
+      h('h3', null, 'Items'),
       o.items.map((it) => h('div', { class: 'order-item' }, pic(it, 'pimg'),
         h('div', null, h('a', { href: `#/p/${it.product_id}` }, it.title), h('div', { class: 'muted small' }, `Qty ${it.qty} · `, h('b', { class: 'now-sm' }, inr(it.price))),
           o.status === 'delivered' ? h('a', { class: 'btn btn-sm btn-outline', href: `#/p/${it.product_id}#reviews` }, 'Review this item') : null))),
-      h('div', { style: { display: 'flex', gap: '10px', marginTop: '10px' } },
-        ['placed', 'packed'].includes(o.status) ? h('button', { class: 'btn btn-outline', onclick: () => act('cancel', 'Cancel this order?') }, 'Cancel order') : null,
-        o.status === 'delivered' ? h('button', { class: 'btn btn-outline', onclick: () => act('return', 'Request a return for this order?') }, 'Return items') : null)));
+      h('div', { style: { display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap', alignItems: 'center' } },
+        ['placed', 'confirmed', 'packed'].includes(o.status) ? h('button', { class: 'btn btn-outline', onclick: async () => {
+          if (await askConfirm('Cancel this order?', 'Yes, cancel it')) done('cancel', undefined, 'Order cancelled.');
+        } }, 'Cancel order') : null,
+        windowOpen && !o.return ? h('button', { class: 'btn btn-outline', onclick: openReturn }, 'Return items') : null,
+        h('a', { href: `#/help?order=${o.id}` }, 'Need help with this order?'))),
+    returnBox);
+}
+
+// ---------- Wallet ----------
+async function viewWallet() {
+  if (!state.user) { location.hash = '#/login?next=%23%2Fwallet'; return; }
+  const w = await api('GET', '/wallet');
+  mount(h('h1', { class: 'page-title' }, 'Bazaario wallet'),
+    h('div', { class: 'stats' }, h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Balance'), h('b', null, inr(w.balance)))),
+    h('p', { class: 'muted' }, 'Refunds you choose to take in the wallet arrive here instantly. Use the balance at checkout.'),
+    w.entries.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      h('tr', null, ['Date', 'Details', 'Amount'].map((t) => h('th', null, t))),
+      w.entries.map((e) => h('tr', null, h('td', null, fmtDate(e.created_at)), h('td', null, e.reason),
+        h('td', { class: e.amount > 0 ? 'ok' : '' }, (e.amount > 0 ? '+' : '-') + inr(Math.abs(e.amount)))))))
+      : h('div', { class: 'card empty' }, h('p', null, 'No wallet activity yet.')));
 }
 
 // ---------- Wishlist ----------
@@ -742,22 +921,64 @@ async function viewWishlist() {
 // ---------- Auth ----------
 function viewLogin(params) {
   if (state.user) { location.hash = '#/'; return; }
-  const next = new URLSearchParams(params).get('next');
+  const qp = new URLSearchParams(params);
+  const next = qp.get('next');
   const safeNext = next && next.startsWith('#/') ? next : '#/';
-  const email = h('input', { type: 'email', required: true, autocomplete: 'username', maxLength: 254 });
-  const pw = h('input', { type: 'password', required: true, autocomplete: 'current-password', maxLength: 128 });
+  const useOtp = qp.get('with') === 'otp' && state.config.otpSignIn;
   const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
-  const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Sign in');
+  const showErr = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+  const switchTo = (mode) => {
+    const n = new URLSearchParams(qp);
+    if (mode === 'otp') n.set('with', 'otp'); else n.delete('with');
+    location.hash = '#/login' + (n.toString() ? '?' + n.toString() : '');
+  };
+
+  let form;
+  if (useOtp) {
+    // Mobile number first, then the 6-digit code we send by SMS.
+    const phone = h('input', { required: true, maxLength: 10, inputMode: 'numeric', pattern: '[6-9][0-9]{9}', autocomplete: 'tel-national', placeholder: '10-digit mobile number' });
+    const code = h('input', { maxLength: 6, inputMode: 'numeric', autocomplete: 'one-time-code', placeholder: '6-digit code' });
+    const codeRow = h('div', { class: 'hidden' }, h('label', null, 'Code'), code, h('p', { class: 'hint' }));
+    const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Send code');
+    let sent = false;
+    form = h('form', { onsubmit: async (e) => {
+      e.preventDefault(); err.classList.add('hidden'); btn.disabled = true;
+      try {
+        if (!sent) {
+          const r = await api('POST', '/auth/otp/request', { phone: phone.value });
+          sent = true;
+          phone.readOnly = true;
+          codeRow.classList.remove('hidden');
+          codeRow.querySelector('.hint').textContent = r.testCode ? `Test mode: no SMS is sent. Your code is ${r.testCode}.` : r.message;
+          btn.textContent = 'Sign in';
+          code.required = true;
+          code.focus();
+        } else {
+          await afterLogin(await api('POST', '/auth/otp/verify', { phone: phone.value, code: code.value }), safeNext);
+        }
+      } catch (ex) { showErr(ex.message); code.value = ''; }
+      btn.disabled = false;
+    } }, h('label', null, 'Mobile number'), phone, codeRow, btn,
+    h('p', { class: 'hint' }, 'Works for accounts with a mobile number. Add one under Profile and security.'));
+  } else {
+    const email = h('input', { type: 'email', required: true, autocomplete: 'username', maxLength: 254 });
+    const pw = h('input', { type: 'password', required: true, autocomplete: 'current-password', maxLength: 128 });
+    const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Sign in');
+    form = h('form', { onsubmit: async (e) => {
+      e.preventDefault(); err.classList.add('hidden'); btn.disabled = true;
+      try { await afterLogin(await api('POST', '/auth/login', { email: email.value, password: pw.value }), safeNext); }
+      catch (ex) { showErr(ex.message); btn.disabled = false; pw.value = ''; }
+    } }, h('label', null, 'Email'), email, h('label', null, 'Password'), pw, btn);
+  }
   mount(h('div', { class: 'auth' },
     h('div', { class: 'auth-side' }, h('h2', null, 'Welcome back'),
       h('p', null, 'Track orders, keep your wishlist and check out faster.')),
-    h('div', { class: 'card' }, h('h1', null, 'Sign in'), err,
-      h('form', { onsubmit: async (e) => {
-        e.preventDefault(); err.classList.add('hidden'); btn.disabled = true;
-        try { await afterLogin(await api('POST', '/auth/login', { email: email.value, password: pw.value }), safeNext); }
-        catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); btn.disabled = false; pw.value = ''; }
-      } }, h('label', null, 'Email'), email, h('label', null, 'Password'), pw, btn),
-      h('p', { class: 'muted small' }, 'By continuing you agree to Bazaario\'s terms and privacy notice.'),
+    h('div', { class: 'card' }, h('h1', null, 'Sign in'),
+      state.config.otpSignIn ? h('div', { class: 'tabs' },
+        h('button', { type: 'button', class: useOtp ? '' : 'on', onclick: () => switchTo('email') }, 'Email'),
+        h('button', { type: 'button', class: useOtp ? 'on' : '', onclick: () => switchTo('otp') }, 'Mobile OTP')) : null,
+      err, form,
+      h('p', { class: 'muted small' }, 'By continuing you agree to Bazaario\'s ', h('a', { href: '#/page/terms' }, 'terms'), ' and ', h('a', { href: '#/page/privacy' }, 'privacy notice'), '.'),
       h('div', { class: 'divider' }, h('span', null, 'New to Bazaario?')),
       h('a', { class: 'btn btn-outline btn-block', href: '#/register' + (next ? '?next=' + encodeURIComponent(next) : '') }, 'Create an account'))));
 }
@@ -802,6 +1023,8 @@ async function viewAccount() {
       tile('#/security', 'Profile & security', 'Name, mobile number and password'),
       tile('#/addresses', 'Addresses', 'Manage delivery addresses'),
       tile('#/wishlist', 'Wishlist', 'Things you have saved'),
+      tile('#/wallet', 'Wallet', 'Refunds and balance'),
+      tile('#/help', 'Help centre', 'Questions and your requests'),
       tile('#/s?deals=1', 'Deals', 'Limited-time offers'),
       state.user.role === 'admin' ? tile('#/admin', 'Bazaario Studio', 'Products, orders, customers, coupons') : null),
     h('p', null, h('button', { class: 'btn btn-outline', onclick: logout }, 'Sign out')));
@@ -855,32 +1078,115 @@ async function viewAddresses() {
 async function viewAdmin(params) {
   if (!state.user) { location.hash = '#/login?next=%23%2Fadmin'; return; }
   if (state.user.role !== 'admin') { mount(h('div', { class: 'card' }, h('h1', null, 'Access denied'), h('p', null, 'This area is restricted to store administrators.'))); return; }
-  const tab = new URLSearchParams(params).get('tab') || 'dashboard';
-  const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['products', 'Products'], ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
+  const qp = new URLSearchParams(params);
+  const tab = qp.get('tab') || 'dashboard';
+  const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['returns', 'Returns'], ['helpdesk', 'Help desk'], ['messages', 'Messages'],
+    ['products', 'Products'], ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
     .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
-  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Orders, catalog, customers and offers'), tabs, body);
+  const test = state.config.testMode || {};
+  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Orders, deliveries, returns, help desk, catalog and offers'),
+    test.payments || test.courier || test.sms ? h('p', { class: 'alert alert-test' },
+      'Test mode: payments are simulated, tracking numbers are generated here, and SMS and email messages are recorded under Messages instead of being sent. Connect real partner accounts to go live.') : null,
+    tabs, body);
 
   if (tab === 'dashboard') {
     const s = await api('GET', '/admin/stats');
+    const tile = (l, val, href, alert) => h(href ? 'a' : 'div', { class: 'stat' + (alert ? ' stat-alert' : ''), href }, h('span', { class: 'hint' }, l), h('b', null, val));
     body.append(h('div', { class: 'stats' },
-      [['Revenue', inr(s.revenue)], ['Orders', s.orders], ['Open orders', s.pending], ['Customers', s.customers], ['Active products', s.products]]
-        .map(([l, val]) => h('div', { class: 'stat' }, h('span', { class: 'hint' }, l), h('b', null, val)))),
+      tile('Revenue', inr(s.revenue)), tile('Orders', s.orders), tile('Open orders', s.pending, '#/admin?tab=orders'),
+      tile('Failed deliveries', s.failedDeliveries, '#/admin?tab=orders&status=delivery_failed', s.failedDeliveries > 0),
+      tile('Open returns', s.returns, '#/admin?tab=returns', s.returns > 0),
+      tile('Open requests', s.overdueTickets ? `${s.tickets} (${s.overdueTickets} late)` : s.tickets, '#/admin?tab=helpdesk', s.overdueTickets > 0),
+      tile('Customers', s.customers), tile('Active products', s.products)),
     h('div', { class: 'card' }, h('h3', null, 'Low stock (under 20)'),
       s.lowStock.length ? h('table', null, h('tr', null, h('th', null, 'Product'), h('th', null, 'Stock')),
         s.lowStock.map((p) => h('tr', null, h('td', null, p.title), h('td', { class: 'err' }, p.stock)))) : h('p', { class: 'muted' }, 'All products are well stocked.')));
   }
 
   if (tab === 'orders') {
-    const { orders, transitions } = await api('GET', '/admin/orders');
-    body.append(h('div', { class: 'table-wrap' }, h('table', null,
-      h('tr', null, ['Order #', 'Date', 'Customer', 'Total', 'Payment', 'Status', 'Update'].map((t) => h('th', null, t))),
-      orders.map((o) => h('tr', null, h('td', null, o.order_no), h('td', null, fmtDate(o.created_at)), h('td', null, o.customer, h('div', { class: 'hint' }, o.email)),
-        h('td', null, inr(o.total)), h('td', null, `${o.payment_method.toUpperCase()} · ${o.payment_status}`), h('td', null, STATUS_LABEL[o.status]),
-        h('td', null, transitions[o.status].length ? h('select', { onchange: async (e) => {
-          if (!e.target.value) return;
-          try { await api('PATCH', `/admin/orders/${o.id}`, { status: e.target.value }); toast('Order updated.'); route(); } catch (ex) { fail(ex); }
-        } }, h('option', { value: '' }, 'Move to…'), transitions[o.status].map((t) => h('option', { value: t }, STATUS_LABEL[t]))) : '—'))))));
+    const status = qp.get('status');
+    const { orders, transitions } = await api('GET', '/admin/orders' + (status ? `?status=${encodeURIComponent(status)}` : ''));
+    const filter = h('select', { 'aria-label': 'Show orders', style: { width: 'auto' }, onchange: (e) => { location.hash = '#/admin?tab=orders' + (e.target.value ? `&status=${e.target.value}` : ''); } },
+      h('option', { value: '' }, 'All orders'), Object.keys(transitions).map((k) => h('option', { value: k, selected: k === status }, STATUS_LABEL[k])));
+    body.append(h('p', null, h('label', { class: 'inline' }, 'Show: ', filter)),
+      h('div', { class: 'table-wrap' }, h('table', null,
+        h('tr', null, ['Order #', 'Placed', 'Customer', 'Delivery', 'Total', 'Payment', 'Status', 'Update'].map((t) => h('th', null, t))),
+        orders.map((o) => h('tr', null, h('td', null, o.order_no), h('td', null, fmtDate(o.created_at)), h('td', null, o.customer, h('div', { class: 'hint' }, o.email)),
+          h('td', null, o.delivery_speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : 'Standard',
+            o.promised_at ? h('div', { class: 'hint' }, `Promised ${fmtWhen(o.promised_at)}`) : null, o.awb ? h('div', { class: 'hint' }, o.awb) : null),
+          h('td', null, inr(o.total)), h('td', null, `${PAY_LABEL[o.payment_method] || o.payment_method} · ${o.payment_status}`),
+          h('td', null, STATUS_LABEL[o.status], o.status === 'delivery_failed' && o.reattempt ? h('div', { class: 'hint ok' }, `Buyer asked: ${o.reattempt}`) : null),
+          h('td', null, transitions[o.status].length ? h('select', { onchange: async (e) => {
+            if (!e.target.value) return;
+            try { await api('PATCH', `/admin/orders/${o.id}`, { status: e.target.value }); toast('Order updated. The buyer has been told.'); route(); } catch (ex) { fail(ex); }
+          } }, h('option', { value: '' }, 'Move to…'), transitions[o.status].map((t) => h('option', { value: t }, STATUS_LABEL[t]))) : '—'))))));
+  }
+
+  if (tab === 'returns') {
+    const { returns } = await api('GET', '/admin/returns');
+    const actOn = async (r, action, note) => {
+      try { await api('PATCH', `/admin/returns/${r.id}`, { action, note }); toast('Return updated. The buyer has been told.'); route(); } catch (ex) { fail(ex); }
+    };
+    const reject = (r) => {
+      const modal = $('#modal');
+      const note = h('input', { maxLength: 300, required: true, placeholder: 'For example: item was used' });
+      $('#modal-body').replaceChildren(h('h3', null, `Reject return for ${r.order_no}?`), h('p', { class: 'muted small' }, 'The buyer sees this reason.'),
+        h('form', { onsubmit: (e) => { e.preventDefault(); modal.close(); actOn(r, 'reject', note.value); } }, h('label', null, 'Reason'), note,
+          h('div', { style: { display: 'flex', gap: '8px', marginTop: '12px' } }, h('button', { class: 'btn btn-outline' }, 'Reject return'),
+            h('button', { type: 'button', class: 'btn', onclick: () => modal.close() }, 'Go back'))));
+      modal.showModal();
+    };
+    const RS = { requested: 'New', pickup_scheduled: 'Pickup scheduled', refunded: 'Refunded', rejected: 'Rejected' };
+    body.append(returns.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      h('tr', null, ['Order #', 'Customer', 'Reason', 'Refund to', 'Status', 'Action'].map((t) => h('th', null, t))),
+      returns.map((r) => h('tr', null, h('td', null, r.order_no, h('div', { class: 'hint' }, inr(r.total))), h('td', null, r.customer, h('div', { class: 'hint' }, r.email)),
+        h('td', null, r.reason, r.comment ? h('div', { class: 'hint' }, r.comment) : null),
+        h('td', null, r.refund_to === 'wallet' ? 'Wallet' : 'Original payment'), h('td', null, RS[r.status], r.note ? h('div', { class: 'hint' }, r.note) : null),
+        h('td', null, h('div', { class: 'line-actions' },
+          r.status === 'requested' ? h('button', { class: 'btn btn-sm btn-outline', onclick: () => actOn(r, 'approve') }, 'Approve pickup') : null,
+          r.status === 'pickup_scheduled' ? h('button', { class: 'btn btn-sm btn-outline', onclick: () => actOn(r, 'refund') }, 'Item received: refund') : null,
+          ['requested', 'pickup_scheduled'].includes(r.status) ? h('button', { class: 'link-btn danger', onclick: () => reject(r) }, 'Reject') : null)))))) 
+      : h('div', { class: 'card empty' }, h('p', null, 'No returns yet.')));
+  }
+
+  if (tab === 'helpdesk') {
+    const { tickets, categories } = await api('GET', '/admin/tickets');
+    const open = qp.get('ticket');
+    if (open) {
+      const { ticket: t } = await api('GET', `/admin/tickets/${encodeURIComponent(open)}`);
+      const reply = h('textarea', { rows: 3, maxLength: 4000, required: true, placeholder: 'Write your reply to the buyer' });
+      const send = async (close) => {
+        try { await api('POST', `/admin/tickets/${t.id}/reply`, { message: reply.value, close }); toast('Reply sent.'); location.hash = '#/admin?tab=helpdesk'; } catch (ex) { fail(ex); }
+      };
+      const who = { customer: t.customer, agent: 'Bazaario support', system: 'Automatic message' };
+      body.append(h('div', { class: 'card', style: { marginBottom: '16px' } },
+        h('p', null, h('a', { href: '#/admin?tab=helpdesk' }, 'All requests')),
+        h('h3', null, `${t.ticket_no} · ${t.subject}`),
+        h('p', { class: 'hint' }, `${categories[t.category]} · ${t.customer} (${t.email})${t.order_no ? ' · Order ' + t.order_no : ''} · ${TICKET_STATUS[t.status]}`),
+        h('div', { class: 'thread' }, t.messages.map((m) => h('div', { class: 'msg ' + m.author },
+          h('div', { class: 'hint' }, h('b', null, who[m.author]), ' · ', fmtWhen(m.created_at)), h('p', null, m.body)))),
+        t.status === 'closed' ? h('p', { class: 'muted' }, 'This request is closed.') : [h('label', null, 'Reply'), reply,
+          h('div', { style: { display: 'flex', gap: '8px', marginTop: '10px' } },
+            h('button', { class: 'btn btn-outline', onclick: () => send(false) }, 'Send reply'),
+            h('button', { class: 'btn', onclick: () => send(true) }, 'Reply and close'))]));
+    }
+    const now = Date.now();
+    body.append(tickets.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      h('tr', null, ['Request', 'Topic', 'Customer', 'Subject', 'Status', 'Reply due'].map((t) => h('th', null, t))),
+      tickets.map((t) => h('tr', null, h('td', null, h('a', { href: `#/admin?tab=helpdesk&ticket=${t.id}` }, t.ticket_no)),
+        h('td', null, categories[t.category]), h('td', null, t.customer), h('td', null, t.subject), h('td', null, TICKET_STATUS[t.status]),
+        h('td', { class: t.status === 'open' && t.due_at < now ? 'err' : '' }, t.status === 'open' ? (t.due_at < now ? `Late since ${fmtWhen(t.due_at)}` : fmtWhen(t.due_at)) : '—')))))
+      : h('div', { class: 'card empty' }, h('p', null, 'No requests yet.')));
+  }
+
+  if (tab === 'messages') {
+    const { messages } = await api('GET', '/admin/messages');
+    body.append(h('p', { class: 'muted' }, 'Every SMS and email Bazaario sends to buyers. In test mode they are recorded here instead of being delivered.'),
+      h('div', { class: 'table-wrap' }, h('table', null,
+        h('tr', null, ['Time', 'Channel', 'To', 'Order', 'Message'].map((t) => h('th', null, t))),
+        messages.map((m) => h('tr', null, h('td', null, fmtWhen(m.created_at)), h('td', null, m.channel.toUpperCase(), h('div', { class: 'hint' }, m.provider)),
+          h('td', null, m.recipient), h('td', null, m.order_no || '—'), h('td', null, m.body))))));
   }
 
   if (tab === 'products') {
@@ -1005,23 +1311,159 @@ function photoField(f, p) {
         h('span', { class: 'muted small' }, 'Square photos on a plain background look best.'))));
 }
 
-// ---------- Static info pages ----------
-const PAGES = {
-  about: ['Our story', 'Bazaario brings the warmth of an Indian bazaar online: handpicked brands, honest prices, and delivery to your doorstep.'],
-  careers: ['Careers', 'We are hiring engineers, designers and operations specialists across India.'],
-  press: ['Press Releases', 'For media enquiries please contact press@bazaario.example.'],
-  sell: ['Sell on Bazaario', 'Reach crores of customers. Register as a seller, list products, and let us handle delivery and payments.'],
-  affiliate: ['Become an Affiliate', 'Earn up to 10% commission by recommending products to your audience.'],
-  ads: ['Advertise Your Products', 'Sponsored product listings help shoppers discover your brand.'],
-  protection: ['100% Purchase Protection', 'Secure payments, genuine products and easy returns — or your money back.'],
-  help: ['Help', 'Track orders from Your Orders, request returns within the return window, and manage addresses from Your Account.'],
-  privacy: ['Privacy Notice', 'We collect only the data needed to process your orders. Passwords are hashed, card numbers are never stored, and session cookies are HttpOnly.'],
-  terms: ['Conditions of Use', 'By using Bazaario you agree to our terms of sale, return policy and acceptable use policy.'],
-  returns: ['Return Policy', 'Most items can be returned within 10 days of delivery for a full refund to the original payment method.'],
-};
+// ---------- Help centre (blueprint stage 11) ----------
+const FAQ = [
+  ['Orders and delivery', [
+    ['When will my order arrive?', 'The product page and checkout show the delivery date for your PIN code. Express orders arrive in under 90 minutes in partner cities; Standard orders take 2 to 7 days depending on where you live.'],
+    ['How do I track my order?', 'Open Your orders and choose Track and manage. You will see each step, the courier and the tracking number. We also send SMS and email updates.'],
+    ['I missed my delivery. What now?', 'Open the order and choose a new delivery time. We try up to three times before the order comes back to us.'],
+    ['Can I cancel an order?', 'Yes, until it ships. Open the order and choose Cancel order. Any payment is refunded straight away.'],
+  ]],
+  ['Payments', [
+    ['Which payment methods can I use?', 'UPI, credit and debit cards, no-cost EMI on orders of ₹3,000 and above, your Bazaario wallet, and Cash on Delivery.'],
+    ['Why is Cash on Delivery not available for me?', 'COD is not offered on the islands or above ₹50,000, and it is paused for accounts where earlier COD deliveries were refused. You can always pay online.'],
+    ['Is my card safe?', 'Card payments go through a licensed payment gateway. Bazaario never stores your card number; we keep only its last 4 digits.'],
+  ]],
+  ['Returns and refunds', [
+    ['How do I return an item?', 'Within 10 days of delivery, open the order and choose Return items. Pick a reason and we will arrange a pickup from your address.'],
+    ['When do I get my refund?', 'Wallet refunds are instant once we receive the item. Refunds to a card, UPI or bank take 5 to 7 working days. Cash on Delivery orders are refunded to the wallet.'],
+  ]],
+  ['Your account', [
+    ['How do I sign in with my mobile number?', 'Add your mobile number under Profile and security, then choose Mobile OTP on the sign-in page.'],
+    ['How do I change my address?', 'Go to My account, then Addresses.'],
+  ]],
+];
+
+async function viewHelp(params) {
+  const q = new URLSearchParams(params);
+  const g = state.config.grievanceOfficer || {};
+  const faq = h('div', { class: 'card' }, h('h2', null, 'Common questions'),
+    FAQ.map(([group, items]) => [h('h4', null, group), items.map(([qq, a]) => h('details', { class: 'faq' }, h('summary', null, qq), h('p', null, a)))]));
+
+  let contact;
+  let mine = null;
+  if (!state.user) {
+    contact = h('div', { class: 'card' }, h('h2', null, 'Contact us'), h('p', null, 'Sign in to raise a request about an order and follow our reply here.'),
+      h('a', { class: 'btn btn-outline', href: '#/login?next=' + encodeURIComponent('#/help') }, 'Sign in'));
+  } else {
+    const [{ categories }, { orders }, { tickets }] = await Promise.all([api('GET', '/support/categories'), api('GET', '/orders'), api('GET', '/tickets')]);
+    const pre = q.get('order');
+    const cat = h('select', { required: true }, Object.entries(categories).map(([k, l]) => h('option', { value: k, selected: q.get('topic') === k || (pre && k === 'order') }, l)));
+    const ord = h('select', null, h('option', { value: '' }, 'Not about a specific order'),
+      orders.map((o) => h('option', { value: o.id, selected: String(o.id) === pre }, `${o.order_no} · ${fmtDate(o.created_at)} · ${STATUS_LABEL[o.status]}`)));
+    const subject = h('input', { required: true, minLength: 4, maxLength: 120, placeholder: 'For example: parcel not delivered' });
+    const msg = h('textarea', { required: true, minLength: 10, maxLength: 4000, rows: 4, placeholder: 'Tell us what happened' });
+    contact = h('div', { class: 'card' }, h('h2', null, 'Contact us'),
+      h('p', { class: 'muted small' }, `We reply within ${24} hours. Complaints to the Grievance Officer are resolved within 30 days.`),
+      h('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          const { ticket } = await api('POST', '/tickets', { category: cat.value, orderId: ord.value || undefined, subject: subject.value, message: msg.value });
+          toast(`Request ${ticket.ticket_no} sent.`);
+          location.hash = `#/help/t/${ticket.id}`;
+        } catch (ex) { fail(ex); }
+      } }, h('label', null, 'What is it about?'), cat, h('label', null, 'Order'), ord, h('label', null, 'Subject'), subject,
+      h('label', null, 'Message'), msg, h('button', { class: 'btn btn-primary', style: { marginTop: '10px' } }, 'Send request')));
+    mine = h('div', { class: 'card' }, h('h2', null, 'My requests'),
+      tickets.length ? h('div', { class: 'table-wrap' }, h('table', null,
+        h('tr', null, ['Request', 'Subject', 'Status', 'Updated'].map((t) => h('th', null, t))),
+        tickets.map((t) => h('tr', null, h('td', null, h('a', { href: `#/help/t/${t.id}` }, t.ticket_no)), h('td', null, t.subject),
+          h('td', null, TICKET_STATUS[t.status]), h('td', null, fmtDate(t.updated_at)))))) : h('p', { class: 'muted' }, 'You have not raised any requests.'));
+  }
+
+  mount(h('h1', { class: 'page-title' }, 'Help centre'),
+    h('div', { class: 'acc-grid' },
+      h('a', { class: 'acc-tile', href: '#/orders' }, h('h3', null, 'Track, cancel or return'), h('div', { class: 'muted small' }, 'Everything about an order starts from Your orders')),
+      h('a', { class: 'acc-tile', href: '#/wallet' }, h('h3', null, 'Refunds and wallet'), h('div', { class: 'muted small' }, 'See refunds and your wallet balance')),
+      h('a', { class: 'acc-tile', href: '#/page/returns' }, h('h3', null, 'Return policy'), h('div', { class: 'muted small' }, 'What can be returned and how')),
+      h('a', { class: 'acc-tile', href: '#/page/grievance' }, h('h3', null, 'Grievance Officer'), h('div', { class: 'muted small' }, 'Raise a formal complaint'))),
+    h('div', { class: 'two-col help-cols' }, h('div', null, faq, mine), contact));
+}
+
+const TICKET_STATUS = { open: 'Waiting for our reply', answered: 'Replied', closed: 'Closed' };
+
+async function viewTicket(id) {
+  if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent(location.hash); return; }
+  const { ticket: t } = await api('GET', `/tickets/${encodeURIComponent(id)}`);
+  const reply = h('textarea', { rows: 3, maxLength: 4000, placeholder: 'Write a reply' });
+  const who = { customer: 'You', agent: 'Bazaario support', system: 'Bazaario' };
+  mount(h('p', null, h('a', { href: '#/help' }, 'Help centre')),
+    h('h1', { class: 'page-title' }, t.subject),
+    h('p', { class: 'muted' }, `Request ${t.ticket_no} · ${TICKET_STATUS[t.status]}${t.order_no ? ' · Order ' + t.order_no : ''}`),
+    h('div', { class: 'card thread' }, t.messages.map((m) => h('div', { class: 'msg ' + m.author },
+      h('div', { class: 'hint' }, h('b', null, who[m.author]), ' · ', fmtWhen(m.created_at)), h('p', null, m.body)))),
+    t.status === 'closed' ? h('p', { class: 'muted' }, 'This request is closed. ', h('a', { href: '#/help' }, 'Start a new one')) : h('div', { class: 'card' },
+      h('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        try { await api('POST', `/tickets/${t.id}/messages`, { message: reply.value }); toast('Reply sent.'); route(); } catch (ex) { fail(ex); }
+      } }, h('label', null, 'Reply'), reply,
+      h('div', { style: { display: 'flex', gap: '8px', marginTop: '10px' } },
+        h('button', { class: 'btn btn-primary' }, 'Send reply'),
+        h('button', { type: 'button', class: 'btn btn-outline', onclick: async () => { await api('POST', `/tickets/${t.id}/close`).catch(fail); route(); } }, 'My issue is solved')))));
+}
+
+// ---------- Policy and info pages ----------
+// Plain-language policies a store must show under the Consumer Protection (E-Commerce) Rules 2020.
+// Company details come from settings; replace the placeholders before going live.
+function policyPages() {
+  const g = state.config.grievanceOfficer || {};
+  const co = state.config.companyName || 'Bazaario';
+  const days = state.config.returnWindowDays || 10;
+  return {
+    about: ['Our story', [['', 'Bazaario brings the warmth of an Indian bazaar online: handpicked brands, honest prices and delivery to your doorstep, from Express deliveries in under 90 minutes to every PIN code in India.']]],
+    careers: ['Careers', [['', 'We are hiring engineers, designers and operations specialists across India.']]],
+    sell: ['Sell on Bazaario', [['', 'Seller registration opens soon. Brands, regular sellers, small manufacturers and local shops will each have their own plan, with Bazaario handling payments and delivery.']]],
+    protection: ['Buyer protection', [['', 'Secure payments, genuine products and easy returns. If an item arrives damaged or different from what you ordered, return it within the return window for a full refund.']]],
+    terms: ['Terms of use', [
+      ['Who we are', `This store is run by ${co}. By using it you agree to these terms.`],
+      ['Prices and payment', 'All prices are in Indian rupees and include GST. The price you pay is the price shown at checkout. We may cancel an order if a price was shown wrongly, and refund you in full.'],
+      ['Orders', 'An order is confirmed when you receive the confirmation message. We may cancel an order if the item is out of stock or the address cannot be served, and refund any payment.'],
+      ['Reviews', 'Reviews must be honest and about the product. We remove reviews that are fake, abusive or paid for.'],
+      ['Complaints', `If something goes wrong, contact us through the Help centre, or write to our Grievance Officer at ${g.email || 'the address on the Grievance Officer page'}.`],
+    ]],
+    privacy: ['Privacy notice', [
+      ['What we collect', 'Your name, contact details, delivery addresses, orders and payment references. We never store full card numbers.'],
+      ['Why', 'To deliver your orders, take payments, give refunds, answer your requests and, if you agree, send offers.'],
+      ['Who we share it with', 'Only the partners needed to complete your order: the payment gateway, courier and SMS or email service.'],
+      ['Your rights', 'Under the Digital Personal Data Protection Act 2023 you can ask to see, correct or delete your data. Write to us through the Help centre.'],
+      ['Security', 'Passwords are hashed, sessions use secure cookies, and access to your data is limited to staff who need it.'],
+    ]],
+    returns: ['Return and refund policy', [
+      ['Return window', `Most items can be returned within ${days} days of delivery. Open the order and choose Return items.`],
+      ['Items that cannot be returned', 'Innerwear, personal care and beauty products once opened, food and grocery, and items marked non-returnable on the product page.'],
+      ['Pickup', 'We collect the item from your delivery address. Please pack it with its tags, accessories and invoice.'],
+      ['Refunds', 'Once the item is received and checked, wallet refunds are instant and refunds to a card, UPI or bank take 5 to 7 working days. Cash on Delivery orders are refunded to your Bazaario wallet.'],
+      ['Damaged or wrong items', 'Choose the matching reason and add details. These returns are always accepted within the window.'],
+    ]],
+    shipping: ['Shipping and delivery', [
+      ['Express', `Under 90 minutes from partner stores in ${(state.config.expressCities || []).join(', ')}, for items marked Express, between 8 am and 7:30 pm. Express costs ${inr(state.config.expressFee || 4900)}.`],
+      ['Standard', `2 days in major cities, 3 days in most of India, 5 days in the North East and Jammu, Kashmir and Ladakh, and 7 days to the islands. Free on orders above ${inr(state.config.freeShippingThreshold || 49900)}, otherwise ${inr(state.config.shippingFee || 4000)}.`],
+      ['Cash on Delivery', 'Available on orders up to ₹50,000, except on the Andaman and Nicobar and Lakshadweep islands.'],
+      ['Missed deliveries', 'If we miss you, choose a new delivery time from the order page. After three failed attempts the order comes back to us and any payment is refunded.'],
+    ]],
+    cancellation: ['Cancellation policy', [
+      ['Before shipping', 'You can cancel any order until it ships, from the order page. Payments are refunded straight away; wallet money returns to your wallet.'],
+      ['After shipping', 'Once shipped, an order cannot be cancelled, but you can return it after delivery.'],
+    ]],
+    grievance: ['Grievance Officer', [
+      ['', 'As required by the Consumer Protection (E-Commerce) Rules 2020, you can raise a complaint with our Grievance Officer. We acknowledge every complaint within 48 hours and resolve it within one month.'],
+      ['Name', g.name || ''],
+      ['Email', g.email || ''],
+      g.phone ? ['Phone', g.phone] : null,
+      ['Address', g.address || ''],
+      ['Raise a complaint', 'Use the Help centre and choose "Complaint to the Grievance Officer", so you can follow our reply there.'],
+    ].filter(Boolean)],
+  };
+}
+
 function viewPage(slug) {
-  const p = PAGES[slug];
-  mount(h('div', { class: 'card prose' }, h('h1', null, p ? p[0] : 'Page not found'), h('p', null, p ? p[1] : 'The page you requested does not exist.')));
+  if (slug === 'help') { location.hash = '#/help'; return; }
+  const p = policyPages()[slug];
+  if (!p) { mount(h('div', { class: 'card prose' }, h('h1', null, 'Page not found'), h('p', null, 'The page you requested does not exist.'))); return; }
+  document.title = `${p[0]} - Bazaario`;
+  mount(h('div', { class: 'card prose' }, h('h1', null, p[0]),
+    p[1].map(([head, text]) => [head ? h('h3', null, head) : null, h('p', null, text)]),
+    slug === 'grievance' ? h('a', { class: 'btn btn-outline', href: '#/help?topic=grievance' }, 'Raise a complaint') : null));
 }
 
 // ---------- Install as an app (Android, Windows, macOS) ----------
@@ -1088,6 +1530,8 @@ async function route() {
     addresses: () => viewAddresses(),
     admin: () => viewAdmin(query),
     page: () => viewPage(parts[1]),
+    help: () => (parts[1] === 't' ? viewTicket(parts[2]) : viewHelp(query)),
+    wallet: () => viewWallet(),
     app: () => viewApp(),
   };
   const view = routes[parts[0] || ''];

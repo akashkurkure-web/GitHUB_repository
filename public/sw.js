@@ -2,7 +2,7 @@
 // Service worker: makes Bazaario installable as an app (Android, Windows, macOS) and keeps the
 // storefront shell available on a flaky connection. API responses are never cached: prices,
 // stock, carts and orders always come live from the server.
-const VERSION = 'bazaario-v1';
+const VERSION = 'bazaario-v2';
 const SHELL = ['/', '/styles.css', '/app.js', '/favicon.svg', '/manifest.webmanifest', '/offline.html',
   '/icons/icon-192.png', '/icons/icon-512.png'];
 

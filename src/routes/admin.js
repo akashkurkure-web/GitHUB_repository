@@ -5,7 +5,9 @@ const path = require('node:path');
 const express = require('express');
 const config = require('../config');
 const db = require('../db');
-const { loadOrder, restock } = require('./orders');
+const { loadOrder } = require('./orders');
+const { FLOW, move, event } = require('../fulfilment');
+const notify = require('../notify');
 const { HttpError, requireAdmin, audit, v } = require('../security');
 
 const router = express.Router();
@@ -14,9 +16,13 @@ router.use(requireAdmin);
 router.get('/stats', (_req, res) => {
   const d = db.get();
   res.json({
-    revenue: d.prepare("SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status NOT IN ('cancelled','returned')").get().n,
+    revenue: d.prepare("SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status NOT IN ('cancelled','returned','rto')").get().n,
     orders: d.prepare('SELECT COUNT(*) AS n FROM orders').get().n,
-    pending: d.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('placed','packed','shipped','return_requested')").get().n,
+    pending: d.prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('placed','confirmed','packed','shipped','out_for_delivery','delivery_failed')").get().n,
+    returns: d.prepare("SELECT COUNT(*) AS n FROM returns WHERE status IN ('requested','pickup_scheduled')").get().n,
+    tickets: d.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status = 'open'").get().n,
+    overdueTickets: d.prepare("SELECT COUNT(*) AS n FROM tickets WHERE status = 'open' AND due_at < ?").get(Date.now()).n,
+    failedDeliveries: d.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'delivery_failed'").get().n,
     customers: d.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'").get().n,
     products: d.prepare('SELECT COUNT(*) AS n FROM products WHERE active = 1').get().n,
     lowStock: d.prepare('SELECT id, title, stock FROM products WHERE active = 1 AND stock < 20 ORDER BY stock LIMIT 10').all(),
@@ -130,48 +136,83 @@ router.delete('/products/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Orders (fulfilment workflow) ----------
-const TRANSITIONS = {
-  placed: ['packed', 'cancelled'],
-  packed: ['shipped', 'cancelled'],
-  shipped: ['delivered'],
-  delivered: [],
-  return_requested: ['returned', 'delivered'],
-  returned: [],
-  cancelled: [],
-};
-
+// ---------- Orders (fulfilment workflow, blueprint stages 6-8) ----------
 router.get('/orders', (req, res) => {
-  const status = typeof req.query.status === 'string' && TRANSITIONS[req.query.status] ? req.query.status : null;
+  const status = typeof req.query.status === 'string' && FLOW[req.query.status] ? req.query.status : null;
   const rows = db.get().prepare(
-    `SELECT o.id, o.order_no, o.status, o.total, o.payment_method, o.payment_status, o.created_at, u.name AS customer, u.email
+    `SELECT o.id, o.order_no, o.status, o.total, o.payment_method, o.payment_status, o.delivery_speed, o.promised_at, o.awb,
+       o.created_at, u.name AS customer, u.email,
+       (SELECT note FROM order_events e WHERE e.order_id = o.id AND e.status = 'reattempt_requested' ORDER BY e.id DESC LIMIT 1) AS reattempt
        FROM orders o JOIN users u ON u.id = o.user_id ${status ? 'WHERE o.status = ?' : ''} ORDER BY o.created_at DESC LIMIT 200`
   ).all(...(status ? [status] : []));
-  res.json({ orders: rows, transitions: TRANSITIONS });
+  res.json({ orders: rows, transitions: FLOW });
 });
 
 router.get('/orders/:id', (req, res) => {
-  res.json({ order: loadOrder(null, v.int(req.params.id, 'Order', { min: 1 }), true), transitions: TRANSITIONS });
+  res.json({ order: loadOrder(null, v.int(req.params.id, 'Order', { min: 1 }), true), transitions: FLOW });
 });
 
 router.patch('/orders/:id', (req, res) => {
   const id = v.int(req.params.id, 'Order', { min: 1 });
   const next = String(req.body.status || '');
-  db.tx((d) => {
-    const o = d.prepare('SELECT status, payment_method, payment_status FROM orders WHERE id = ?').get(id);
-    if (!o) throw new HttpError(404, 'Order not found.');
-    if (!TRANSITIONS[o.status].includes(next)) throw new HttpError(400, `Cannot move an order from "${o.status}" to "${next}".`);
-    const now = Date.now();
-    let payment = o.payment_status;
-    if (next === 'delivered' && o.payment_method === 'cod') payment = 'paid';
-    if ((next === 'cancelled' || next === 'returned') && payment === 'paid') payment = 'refunded';
-    d.prepare(`UPDATE orders SET status = ?, payment_status = ?, updated_at = ?,
-      delivered_at = CASE WHEN ? = 'delivered' AND delivered_at IS NULL THEN ? ELSE delivered_at END WHERE id = ?`)
-      .run(next, payment, now, next, now, id);
-    if (next === 'cancelled' || next === 'returned') restock(d, id);
-  });
+  if (!FLOW[next]) throw new HttpError(400, 'Unknown order status.');
+  const note = v.str(req.body.note, 'Note', { max: 200, optional: true });
+  db.tx((d) => move(d, id, next, { actor: 'admin', note }));
   audit(req, 'admin.order_status', { orderId: id, status: next });
   res.json({ order: loadOrder(null, id, true) });
+});
+
+// ---------- Returns queue (blueprint stage 9) ----------
+router.get('/returns', (_req, res) => {
+  res.json({ returns: db.get().prepare(
+    `SELECT r.id, r.order_id, r.reason, r.comment, r.refund_to, r.status, r.note, r.created_at, r.updated_at,
+       o.order_no, o.total, o.payment_method, u.name AS customer, u.email
+       FROM returns r JOIN orders o ON o.id = r.order_id JOIN users u ON u.id = r.user_id
+      ORDER BY CASE r.status WHEN 'requested' THEN 0 WHEN 'pickup_scheduled' THEN 1 ELSE 2 END, r.created_at DESC LIMIT 200`
+  ).all() });
+});
+
+const RETURN_ACTIONS = {
+  approve: { from: ['requested'], to: 'pickup_scheduled' },
+  refund: { from: ['pickup_scheduled'], to: 'refunded' },
+  reject: { from: ['requested', 'pickup_scheduled'], to: 'rejected' },
+};
+
+router.patch('/returns/:id', (req, res) => {
+  const id = v.int(req.params.id, 'Return', { min: 1 });
+  const action = RETURN_ACTIONS[req.body.action];
+  if (!action) throw new HttpError(400, 'Unknown return action.');
+  const note = v.str(req.body.note, 'Note', { max: 300, optional: req.body.action !== 'reject' });
+  db.tx((d) => {
+    const r = d.prepare('SELECT * FROM returns WHERE id = ?').get(id);
+    if (!r) throw new HttpError(404, 'Return not found.');
+    if (!action.from.includes(r.status)) throw new HttpError(400, 'This return has already moved on. Refresh to see its latest state.');
+    const o = d.prepare('SELECT * FROM orders WHERE id = ?').get(r.order_id);
+    if (req.body.action === 'approve') {
+      event(d, o.id, 'return_pickup', note || 'Pickup scheduled within 2 working days');
+      notify.orderUpdate(d, o, 'Your return is approved. Our delivery partner will pick it up within 2 working days.');
+    }
+    if (req.body.action === 'refund') {
+      // Item received and checked: close the order as returned, which restocks it and pays the refund.
+      move(d, o.id, 'returned', { actor: 'admin', allowAny: true, refundToWallet: r.refund_to === 'wallet', note });
+    }
+    if (req.body.action === 'reject') {
+      d.prepare("UPDATE orders SET status = 'delivered', updated_at = ? WHERE id = ?").run(Date.now(), o.id);
+      event(d, o.id, 'return_rejected', note);
+      notify.orderUpdate(d, o, `We could not accept your return: ${note}`);
+    }
+    d.prepare('UPDATE returns SET status = ?, note = ?, updated_at = ? WHERE id = ?').run(action.to, note || r.note, Date.now(), id);
+  });
+  audit(req, 'admin.return', { returnId: id, action: req.body.action });
+  res.json({ ok: true });
+});
+
+// ---------- Messages sent to buyers (test outbox) ----------
+router.get('/messages', (_req, res) => {
+  res.json({ messages: db.get().prepare(
+    `SELECT n.id, n.channel, n.recipient, n.body, n.provider, n.created_at, o.order_no
+       FROM notifications n LEFT JOIN orders o ON o.id = n.order_id ORDER BY n.id DESC LIMIT 200`
+  ).all() });
 });
 
 // ---------- Customers, coupons, audit ----------
