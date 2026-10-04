@@ -27,6 +27,7 @@ function h(tag, attrs, ...children) {
 }
 /** Replaces an element's content, skipping empty (null/false) parts and flattening lists. */
 const fill = (el, ...nodes) => el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false));
+const add = (el, ...nodes) => el.append(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false));
 const mount = (...nodes) => { app.replaceChildren(...nodes.flat().filter((n) => n !== null && n !== undefined && n !== false)); app.focus({ preventScroll: true }); };
 
 // ---------------- Formatting ----------------
@@ -55,7 +56,11 @@ const STATUS_LABEL = {
   delivery_failed: 'Delivery attempt failed', delivered: 'Delivered', rto: 'Returned to Bazaario', cancelled: 'Cancelled',
   return_requested: 'Return requested', returned: 'Returned and refunded',
   reattempt_requested: 'New delivery time requested', return_pickup: 'Return pickup scheduled', return_rejected: 'Return not accepted',
+  sent_to_seller: 'Sent to the seller', on_hold: 'Being checked', rerouted: 'Moved to another seller',
 };
+const LANE_LABEL = { direct: 'Bazaario Direct', brand: 'Brand store', standard: 'Standard seller', value: 'Value seller' };
+/** "Excellent" etc. from a seller performance score; new sellers have none yet. */
+const scoreText = (score) => (score === null || score === undefined ? 'New seller' : score >= 85 ? `Excellent seller (${score}/100)` : score >= 70 ? `Good seller (${score}/100)` : `Seller score ${score}/100`);
 const PAY_LABEL = { upi: 'UPI', card: 'Card', emi: 'Card EMI', cod: 'Cash on Delivery', wallet: 'Wallet' };
 
 function priceBlock(p, big) {
@@ -85,6 +90,7 @@ async function api(method, path, body) {
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
+    err.details = data.details;
     if (res.status === 401 && state.user) { state.user = null; state.csrf = null; renderHeader(); }
     throw err;
   }
@@ -185,15 +191,19 @@ function askConfirm(message, yesLabel = 'Yes') {
 }
 
 // ---------------- Cart actions ----------------
-async function addToCart(product, qty = 1, buyNow = false) {
+/** Adds to the bag from the best offer, or from one seller's offer when `offerId` is given ("Other sellers"). */
+async function addToCart(product, qty = 1, buyNow = false, offerId = null) {
   try {
     if (state.user) {
-      await api('POST', '/cart', { productId: product.id, qty });
+      await api('POST', '/cart', { productId: product.id, qty, offerId: offerId || undefined });
     } else {
       const items = guestCart();
       const ex = items.find((i) => i.productId === product.id);
       const max = Math.min(product.stock, state.config.maxQtyPerItem || 10);
-      if (ex) ex.qty = Math.min(ex.qty + qty, max); else items.unshift({ productId: product.id, qty: Math.min(qty, max) });
+      // Picking another seller replaces the line, as it does for signed-in shoppers.
+      if (ex && (ex.offerId || null) === (offerId || null)) ex.qty = Math.min(ex.qty + qty, max);
+      else if (ex) Object.assign(ex, { qty: Math.min(qty, max), offerId: offerId || undefined });
+      else items.unshift({ productId: product.id, qty: Math.min(qty, max), offerId: offerId || undefined });
       setGuestCart(items);
     }
     await updateCartCount();
@@ -261,6 +271,7 @@ function productCard(p, { compact } = {}) {
       h('a', { class: 'title', href: url }, p.title),
       ratingChip(p),
       priceBlock(p),
+      p.assured ? h('span', { class: 'assured-tag' }, 'Bazaario Assured') : null,
       h('div', { class: 'ship' }, p.express ? 'Express delivery available' : `Free delivery by ${deliveryDate(false).split(',')[0]}`),
       p.stock === 0 ? h('div', { class: 'err' }, 'Out of stock') : p.stock < 10 ? h('div', { class: 'low' }, `Only ${p.stock} left`) : null,
       compact || p.stock === 0 ? null : h('button', { class: 'btn btn-outline btn-block', onclick: () => addToCart(p) }, 'Add to bag')));
@@ -347,6 +358,7 @@ async function viewSearch(params) {
     h('div', { class: 'price-range' }, minIn, maxIn, h('button', { class: 'btn btn-sm', onclick: () => go({ min: minIn.value || null, max: maxIn.value || null }) }, 'Go')),
     h('h4', null, 'Offers'),
     h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('deals') === '1', onchange: (e) => go({ deals: e.target.checked ? '1' : null }) }), 'Deals only'),
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: q.get('assured') === '1', onchange: (e) => go({ assured: e.target.checked ? '1' : null }) }), 'Bazaario Assured'),
     h('p', null, h('a', { class: 'btn btn-ghost', href: '#/s' }, 'Clear all filters')));
 
   const start = (data.page - 1) * data.pageSize + 1;
@@ -360,7 +372,7 @@ async function viewSearch(params) {
     h('button', { class: 'btn', disabled: data.page >= data.pages, onclick: () => go({ page: data.page + 1 }) }, 'Next ›')) : null;
 
   // On phones the filters fold away behind one button so results come first.
-  const filterCount = ['express', 'instock', 'category', 'rating', 'brand', 'min', 'max', 'deals'].filter((k) => q.get(k)).length;
+  const filterCount = ['express', 'instock', 'category', 'rating', 'brand', 'min', 'max', 'deals', 'assured'].filter((k) => q.get(k)).length;
   const filterBox = h('details', { class: 'filters-fold', open: window.matchMedia('(min-width: 1081px)').matches },
     h('summary', null, filterCount ? `Filters (${filterCount})` : 'Filters'), filters);
   mount(h('div', { class: 'search-layout' }, filterBox,
@@ -431,6 +443,25 @@ async function viewProduct(id) {
 
   const wishBtn = paintWishButton(h('button', { class: 'btn btn-outline', type: 'button', 'data-wish': p.id, onclick: (e) => toggleWishlist(p, e.currentTarget) }));
 
+  // Marketplace: who sells it, other sellers, and the details the law asks every listing to show.
+  const best = p.offers[0] || null;
+  const sellerLink = (s) => h('button', { type: 'button', class: 'link-btn', onclick: () => sellerDetails(s) }, s.name);
+  const shipsText = (o) => (o.seller.lane === 'value' ? `Economy delivery, ships within ${o.seller.state}` : o.dispatchDays <= 1 ? 'Ships today or tomorrow' : `Ships in ${o.dispatchDays} days`);
+  const others = p.offers.slice(1);
+  const otherSellers = others.length ? h('div', { class: 'card other-sellers' },
+    h('h3', null, `Other sellers on Bazaario (${others.length})`),
+    others.map((o) => h('div', { class: 'offer-row' },
+      h('div', null, h('b', { class: 'now-sm' }, inr(o.price)), o.assured ? h('span', { class: 'assured-tag' }, 'Assured') : null,
+        h('div', { class: 'hint' }, shipsText(o))),
+      h('div', null, sellerLink(o.seller), h('div', { class: 'hint' }, o.seller.lane === 'direct' ? 'Sold and shipped by Bazaario' : scoreText(o.seller.score))),
+      h('button', { class: 'btn btn-outline btn-sm', onclick: () => addToCart({ ...p, stock: o.stock }, 1, false, o.id) }, 'Add to bag')))) : null;
+  const specs = Object.entries(p.specs || {});
+  const month = (ym) => new Date(`${ym}-01T00:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: TZ, month: 'long', year: 'numeric' });
+  const details = h('table', { class: 'details' },
+    [['Brand', p.brand], ['Manufacturer', p.manufacturer], ['Country of origin', p.origin], ...specs,
+      best && best.bestBefore ? ['Best before', month(best.bestBefore)] : null].filter(Boolean)
+      .map(([k, val]) => h('tr', null, h('th', null, k), h('td', null, val))));
+
   mount(
     h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, 'Home'), ' / ',
       h('a', { href: `#/s?category=${p.category}` }, p.category_name), ' / ', h('span', null, p.brand)),
@@ -461,12 +492,17 @@ async function viewProduct(id) {
             h('label', { class: 'qty' }, h('span', { class: 'sr-only' }, 'Quantity'), qtySel),
             h('button', { class: 'btn btn-primary', onclick: () => addToCart(p, Number(qtySel.value)) }, 'Add to bag'),
             h('button', { class: 'btn btn-outline', onclick: () => addToCart(p, Number(qtySel.value), true) }, 'Buy now')) : null,
-          h('div', { class: 'buy-foot' }, wishBtn, h('span', { class: 'muted small' }, 'Sold and shipped by Bazaario Retail'))),
+          best ? h('div', { class: 'sold-by' }, 'Sold by ', sellerLink(best.seller),
+            best.assured ? h('span', { class: 'assured-tag' }, 'Bazaario Assured') : null,
+            p.authentic ? h('span', { class: 'hint' }, ' · Authentic: only brands and Bazaario sell this category') : null) : null,
+          h('div', { class: 'buy-foot' }, wishBtn, best && best.extraDays ? h('span', { class: 'muted small' }, shipsText(best)) : null)),
+        otherSellers,
         h('h3', null, 'Offers for you'),
         h('div', { class: 'offers' }, coupons.map(([c, d]) => h('div', { class: 'offer' }, h('b', null, c), h('span', null, d)))),
         h('h3', null, 'Highlights'),
         h('ul', { class: 'features' }, p.features.map((f) => h('li', null, f))),
-        h('p', { class: 'muted' }, p.description))),
+        h('p', { class: 'muted' }, p.description),
+        h('h3', null, 'Product details'), details)),
     h('section', { class: 'reviews', id: 'reviews' },
       h('div', { class: 'review-summary' }, h('h2', null, 'What shoppers say'),
         h('div', { class: 'big-rating' }, h('b', null, p.rating_avg.toFixed(1)), h('span', { class: 'muted' }, 'out of 5'), h('span', { class: 'muted' }, `${p.rating_count.toLocaleString('en-IN')} ratings`)),
@@ -482,6 +518,22 @@ async function viewProduct(id) {
       h('div', { class: 'grid' }, data.related.map((r) => productCard(r)))) : null);
 }
 
+/** Seller details a buyer may see (Consumer Protection (E-Commerce) Rules 2020). */
+function sellerDetails(s) {
+  const modal = $('#modal');
+  $('#modal-body').replaceChildren(h('h3', null, s.name),
+    h('dl', { class: 'seller-dl' },
+      h('dt', null, 'Type'), h('dd', null, LANE_LABEL[s.lane] || 'Seller'),
+      h('dt', null, 'Registered name'), h('dd', null, s.legalName),
+      h('dt', null, 'Ships from'), h('dd', null, [s.city, s.state].filter(Boolean).join(', ')),
+      s.gstin ? [h('dt', null, 'GSTIN'), h('dd', null, s.gstin)] : null,
+      h('dt', null, 'On Bazaario since'), h('dd', null, fmtDate(s.since)),
+      h('dt', null, 'Performance'), h('dd', null, s.lane === 'direct' ? 'Bazaario\'s own stock' : scoreText(s.score))),
+    h('p', { class: 'hint' }, 'Questions about an order from this seller? Our help centre handles them for you.'),
+    h('button', { class: 'btn btn-outline', onclick: () => modal.close() }, 'Close'));
+  modal.showModal();
+}
+
 // ---------- Cart ----------
 async function viewCart() {
   let data;
@@ -489,7 +541,13 @@ async function viewCart() {
   else {
     const items = guestCart();
     const prods = await Promise.all(items.map((i) => api('GET', `/products/${i.productId}`).then((d) => d.product).catch(() => null)));
-    const lines = items.map((i, k) => prods[k] && { product_id: i.productId, qty: Math.min(i.qty, prods[k].stock), ...prods[k] }).filter(Boolean);
+    const lines = items.map((i, k) => {
+      const p = prods[k];
+      if (!p) return null;
+      const o = (i.offerId && p.offers.find((x) => x.id === i.offerId)) || p.offers[0];
+      return { product_id: i.productId, ...p, qty: Math.min(i.qty, o ? o.stock : p.stock), price: o ? o.price : p.price, stock: o ? o.stock : 0,
+        seller_name: o ? o.seller.name : '' };
+    }).filter(Boolean);
     const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
     data = { lines, saved: [], subtotal, count: lines.reduce((s, l) => s + l.qty, 0), freeShippingThreshold: state.config.freeShippingThreshold };
   }
@@ -513,6 +571,8 @@ async function viewCart() {
     h('div', null,
       h('a', { class: 'line-title', href: `#/p/${l.product_id}` }, l.title),
       l.stock > 0 ? h('div', { class: l.stock < 10 ? 'low' : 'ok' }, l.stock < 10 ? `Only ${l.stock} left` : 'In stock') : h('div', { class: 'err' }, 'Out of stock'),
+      l.seller_name ? h('div', { class: 'muted small' }, `Sold by ${l.seller_name}`) : null,
+      l.note ? h('div', { class: 'low small' }, l.note) : null,
       h('div', { class: 'muted small' }, 'Free delivery on orders above ₹499'),
       h('div', { class: 'line-actions' },
         saved ? null : h('select', { 'aria-label': 'Quantity', onchange: (e) => setQty(l, Number(e.target.value)) },
@@ -596,6 +656,7 @@ async function viewCheckout() {
   const summaryBox = h('div', { class: 'card summary' });
   const errBox = h('div', { class: 'alert alert-err hidden' });
   const speedBox = h('div');
+  const itemsBox = h('div');
   const walletBox = h('div');
   const payBox = h('div');
   const coversNote = h('p', { class: 'alert alert-ok hidden' }, 'Your wallet balance covers this order. No other payment is needed.');
@@ -679,7 +740,7 @@ async function viewCheckout() {
     try {
       const q = await api('POST', '/checkout/quote', { addressId: sel.addressId, speed: sel.speed, useWallet: sel.useWallet, coupon: sel.coupon || undefined, paymentMethod: sel.method });
       sel.speed = q.speed;
-      paintSpeeds(q); paintWallet(q); paintPay(q);
+      paintSpeeds(q); paintWallet(q); paintPay(q); paintItems(q);
       fill(summaryBox,
         placeBtn,
         h('p', { class: 'muted small center' }, 'By placing your order you agree to Bazaario\'s ', h('a', { href: '#/page/terms' }, 'terms'), ' and ', h('a', { href: '#/page/privacy' }, 'privacy notice'), '.'),
@@ -702,6 +763,21 @@ async function viewCheckout() {
 
   const couponIn = h('input', { placeholder: 'Enter coupon code', maxLength: 20, style: { width: '200px' } });
 
+  // Items from different sellers arrive as separate packages, each with its own date.
+  const paintItems = (q) => {
+    const byId = new Map(q.lines.map((l) => [l.product_id, l]));
+    fill(itemsBox,
+      q.blocked.length ? h('div', { class: 'alert alert-err' }, q.blocked.map((b) => h('div', null, b)), h('div', { class: 'small' }, 'Open the product to pick another seller, or change the address.')) : null,
+      q.packages.map((pk, i) => h('div', { class: 'package' },
+        q.packages.length > 1 || pk.lane !== 'direct' ? h('div', { class: 'package-head' },
+          h('b', null, q.packages.length > 1 ? `Package ${i + 1} of ${q.packages.length}` : 'Your package'),
+          h('span', { class: 'muted' }, `Sold by ${pk.sellerName}`),
+          pk.promisedAt ? h('span', { class: 'ok' }, `Arrives ${promiseText({ speed: q.speed, promisedAt: pk.promisedAt })}`) : null) : null,
+        pk.lines.map((id) => byId.get(id)).map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
+          h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
+            l.express ? h('div', { class: 'hint' }, 'Express item') : null, l.blocked ? h('div', { class: 'err small' }, l.blocked) : null))))));
+  };
+
   const placeBtn = h('button', { class: 'btn btn-primary btn-block', onclick: async () => {
     errBox.classList.add('hidden');
     if (!sel.addressId) { errBox.textContent = 'Please add a delivery address.'; errBox.classList.remove('hidden'); return; }
@@ -714,7 +790,7 @@ async function viewCheckout() {
       const r = await api('POST', '/orders', { addressId: sel.addressId, speed: sel.speed, useWallet: sel.useWallet, paymentMethod: sel.method, coupon: sel.coupon || undefined, payment, idempotencyKey });
       card.number.value = ''; card.cvv.value = '';
       await updateCartCount();
-      location.hash = `#/orders/${r.orderId}?placed=1`;
+      location.hash = r.orders && r.orders.length > 1 ? `#/orders?placed=${r.checkoutRef}` : `#/orders/${r.orderId}?placed=1`;
     } catch (e) {
       errBox.textContent = e.message; errBox.classList.remove('hidden');
       placeBtn.disabled = false; placeBtn.textContent = 'Place your order';
@@ -741,10 +817,7 @@ async function viewCheckout() {
             if (await refreshQuote() && sel.coupon) toast(`Coupon ${sel.coupon.toUpperCase()} applied.`);
           } }, 'Apply')),
           h('p', { class: 'hint' }, 'Try WELCOME10, SAVE100 or FESTIVE15')),
-        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '4'), 'Your items'),
-          cart.lines.map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
-            h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
-              l.express ? h('div', { class: 'hint' }, 'Express item') : null))))),
+        h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '4'), 'Your items'), itemsBox)),
       summaryBox));
   await refreshQuote();
 }
@@ -752,6 +825,7 @@ async function viewCheckout() {
 // ---------- Orders ----------
 /** Where an order is in its journey, in one line. */
 function orderLine(o) {
+  if (o.status === 'placed' && (o.on_hold || o.hold_reason)) return 'We are checking a few details before sending your order.';
   if (o.status === 'delivered') return o.delivered_at ? `Delivered on ${fmtDate(o.delivered_at)}` : 'Delivered';
   if (['confirmed', 'placed', 'packed', 'shipped', 'out_for_delivery'].includes(o.status) && o.promised_at) {
     return `Arriving ${promiseText({ speed: o.delivery_speed, promisedAt: o.promised_at })}`;
@@ -769,7 +843,8 @@ function orderCard(o) {
       h('div', { class: 'right' }, `ORDER ${o.order_no}`, h('b', null, h('a', { href: `#/orders/${o.id}` }, 'Track and manage')))),
     h('div', { class: 'order-body' },
       h('div', null, h('span', { class: `status ${o.status}` }, STATUS_LABEL[o.status]),
-        o.delivery_speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : null),
+        o.delivery_speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : null,
+        o.seller_name ? h('span', { class: 'muted small' }, ` · Sold by ${o.seller_name}`) : null),
       orderLine(o) ? h('div', { class: o.status === 'delivery_failed' ? 'low' : 'ok' }, orderLine(o)) : null,
       o.items.map((it) => h('div', { class: 'order-item' },
         h('a', { href: `#/p/${it.product_id}` }, pic(it, 'pimg')),
@@ -777,10 +852,14 @@ function orderCard(o) {
           h('button', { class: 'btn btn-sm btn-outline', onclick: async () => addToCart({ id: it.product_id, title: it.title, stock: 10 }) }, 'Buy again'))))));
 }
 
-async function viewOrders() {
+async function viewOrders(params) {
   if (!state.user) { location.hash = '#/login?next=%23%2Forders'; return; }
-  const { orders } = await api('GET', '/orders');
-  mount(h('h1', { class: 'page-title' }, 'Your orders'),
+  const ref = new URLSearchParams(params).get('placed');
+  const { orders } = await api('GET', '/orders' + (ref ? `?ref=${encodeURIComponent(ref)}` : ''));
+  mount(ref && orders.length ? h('div', { class: 'alert alert-ok' }, h('b', null, 'Thank you. Your order is placed.'),
+      ` It comes from ${orders.length} sellers, so it will arrive in ${orders.length} packages, each with its own tracking. We have sent the details to ${state.user.email}.`) : null,
+    ref ? h('p', null, h('a', { href: '#/orders' }, 'All orders')) : null,
+    h('h1', { class: 'page-title' }, ref ? 'Your new order' : 'Your orders'),
     orders.length ? orders.map(orderCard) : h('div', { class: 'card empty' }, h('h2', null, 'No orders yet'), h('p', null, 'When you place an order, you can track it here.'), h('a', { class: 'btn btn-primary', href: '#/' }, 'Start shopping')));
 }
 
@@ -854,7 +933,10 @@ async function viewOrder(id, params) {
       ` We have sent the details to ${state.user.email}. Order # ${o.order_no}`) : null,
     h('p', null, h('a', { href: '#/orders' }, 'All orders')),
     h('h1', { class: 'page-title' }, 'Order details'),
-    h('p', { class: 'muted' }, `Ordered on ${fmtDate(o.created_at)} | Order# ${o.order_no}`),
+    h('p', { class: 'muted' }, `Ordered on ${fmtDate(o.created_at)} | Order# ${o.order_no}`,
+      o.seller ? [' | Sold by ', h('button', { type: 'button', class: 'link-btn', onclick: () => sellerDetails(o.seller) }, o.seller.name)] : null,
+      o.packages > 1 ? h('span', null, ` | Part of a ${o.packages}-package order (`, h('a', { href: `#/orders?placed=${o.checkout_ref}` }, 'see all'), ')') : null),
+    o.status === 'placed' && !o.hold_reason && o.seller && o.seller.lane !== 'direct' ? h('p', { class: 'hint' }, `${o.seller.name} will confirm your order shortly. If they cannot, we move it to another seller at no extra cost.`) : null,
     h('div', { class: 'card' },
       h('div', null, h('span', { class: `status ${o.status}` }, STATUS_LABEL[o.status]), express ? h('span', { class: 'speed-tag' }, 'Express') : null),
       orderLine(o) ? h('div', { class: o.status === 'delivery_failed' ? 'low' : 'ok' }, orderLine(o)) : null,
@@ -888,6 +970,8 @@ async function viewOrder(id, params) {
           if (await askConfirm('Cancel this order?', 'Yes, cancel it')) done('cancel', undefined, 'Order cancelled.');
         } }, 'Cancel order') : null,
         windowOpen && !o.return ? h('button', { class: 'btn btn-outline', onclick: openReturn }, 'Return items') : null,
+        ['shipped', 'out_for_delivery', 'delivery_failed', 'delivered', 'return_requested', 'returned'].includes(o.status)
+          ? h('a', { class: 'btn btn-outline', href: `#/doc/invoice/${o.id}` }, 'Invoice') : null,
         h('a', { href: `#/help?order=${o.id}` }, 'Need help with this order?'))),
     returnBox);
 }
@@ -1026,6 +1110,7 @@ async function viewAccount() {
       tile('#/wallet', 'Wallet', 'Refunds and balance'),
       tile('#/help', 'Help centre', 'Questions and your requests'),
       tile('#/s?deals=1', 'Deals', 'Limited-time offers'),
+      tile('#/seller', 'Seller Hub', 'Sell on Bazaario: listings, orders and payouts'),
       state.user.role === 'admin' ? tile('#/admin', 'Bazaario Studio', 'Products, orders, customers, coupons') : null),
     h('p', null, h('button', { class: 'btn btn-outline', onclick: logout }, 'Sign out')));
 }
@@ -1081,11 +1166,12 @@ async function viewAdmin(params) {
   const qp = new URLSearchParams(params);
   const tab = qp.get('tab') || 'dashboard';
   const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['returns', 'Returns'], ['helpdesk', 'Help desk'], ['messages', 'Messages'],
-    ['products', 'Products'], ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
+    ['products', 'Products'], ['sellers', 'Sellers'], ['qc', 'Catalog check'], ['claims', 'Claims'], ['settlement', 'Settlement'],
+    ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
     .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
   const test = state.config.testMode || {};
-  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Orders, deliveries, returns, help desk, catalog and offers'),
+  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Orders, sellers, deliveries, returns, help desk, catalog and payouts'),
     test.payments || test.courier || test.sms ? h('p', { class: 'alert alert-test' },
       'Test mode: payments are simulated, tracking numbers are generated here, and SMS and email messages are recorded under Messages instead of being sent. Connect real partner accounts to go live.') : null,
     tabs, body);
@@ -1093,11 +1179,16 @@ async function viewAdmin(params) {
   if (tab === 'dashboard') {
     const s = await api('GET', '/admin/stats');
     const tile = (l, val, href, alert) => h(href ? 'a' : 'div', { class: 'stat' + (alert ? ' stat-alert' : ''), href }, h('span', { class: 'hint' }, l), h('b', null, val));
-    body.append(h('div', { class: 'stats' },
+    add(body, h('div', { class: 'stats' },
       tile('Revenue', inr(s.revenue)), tile('Orders', s.orders), tile('Open orders', s.pending, '#/admin?tab=orders'),
       tile('Failed deliveries', s.failedDeliveries, '#/admin?tab=orders&status=delivery_failed', s.failedDeliveries > 0),
       tile('Open returns', s.returns, '#/admin?tab=returns', s.returns > 0),
       tile('Open requests', s.overdueTickets ? `${s.tickets} (${s.overdueTickets} late)` : s.tickets, '#/admin?tab=helpdesk', s.overdueTickets > 0),
+      tile('Orders on hold', s.held, '#/admin?tab=orders&status=held', s.held > 0),
+      tile('Seller applications', s.sellerApplications, '#/admin?tab=sellers&status=pending', s.sellerApplications > 0),
+      tile('Listings to check', s.qcQueue, '#/admin?tab=qc', s.qcQueue > 0),
+      tile('Open claims', s.claims, '#/admin?tab=claims', s.claims > 0),
+      tile('Sellers', s.sellers, '#/admin?tab=sellers'),
       tile('Customers', s.customers), tile('Active products', s.products)),
     h('div', { class: 'card' }, h('h3', null, 'Low stock (under 20)'),
       s.lowStock.length ? h('table', null, h('tr', null, h('th', null, 'Product'), h('th', null, 'Stock')),
@@ -1108,16 +1199,30 @@ async function viewAdmin(params) {
     const status = qp.get('status');
     const { orders, transitions } = await api('GET', '/admin/orders' + (status ? `?status=${encodeURIComponent(status)}` : ''));
     const filter = h('select', { 'aria-label': 'Show orders', style: { width: 'auto' }, onchange: (e) => { location.hash = '#/admin?tab=orders' + (e.target.value ? `&status=${e.target.value}` : ''); } },
-      h('option', { value: '' }, 'All orders'), Object.keys(transitions).map((k) => h('option', { value: k, selected: k === status }, STATUS_LABEL[k])));
-    body.append(h('p', null, h('label', { class: 'inline' }, 'Show: ', filter)),
+      h('option', { value: '' }, 'All orders'), h('option', { value: 'held', selected: status === 'held' }, 'On hold for review'),
+      Object.keys(transitions).map((k) => h('option', { value: k, selected: k === status }, STATUS_LABEL[k])));
+    const release = async (o) => {
+      try { await api('POST', `/admin/orders/${o.id}/release`); toast('Order released to its seller.'); route(); } catch (ex) { fail(ex); }
+    };
+    // Who has the order and why (routing), and who moves it: Bazaario for its own and Fulfilled stock, the seller otherwise.
+    const sellerCell = (o) => h('td', null, o.seller || '—',
+      o.route_reason ? h('div', { class: 'hint' }, o.route_reason) : null,
+      o.status === 'placed' && !o.hold_reason && o.accept_by ? h('div', { class: 'hint low' }, `Seller to accept by ${fmtWhen(o.accept_by)}`) : null,
+      o.seller_lane && o.seller_lane !== 'direct' && o.seller_fulfilment !== 'fulfilled' ? h('div', { class: 'hint' }, 'Seller ships') : null);
+    add(body, h('p', null, h('label', { class: 'inline' }, 'Show: ', filter)),
       h('div', { class: 'table-wrap' }, h('table', null,
-        h('tr', null, ['Order #', 'Placed', 'Customer', 'Delivery', 'Total', 'Payment', 'Status', 'Update'].map((t) => h('th', null, t))),
-        orders.map((o) => h('tr', null, h('td', null, o.order_no), h('td', null, fmtDate(o.created_at)), h('td', null, o.customer, h('div', { class: 'hint' }, o.email)),
+        h('tr', null, ['Order #', 'Placed', 'Customer', 'Seller', 'Delivery', 'Total', 'Payment', 'Status', 'Update'].map((t) => h('th', null, t))),
+        orders.map((o) => h('tr', null, h('td', null, o.order_no, o.status !== 'placed' && o.status !== 'cancelled'
+          ? h('div', null, h('a', { class: 'hint', href: `#/doc/invoice/${o.id}?as=admin` }, 'Invoice'), ' · ', h('a', { class: 'hint', href: `#/doc/label/${o.id}?as=admin` }, 'Label')) : null),
+          h('td', null, fmtDate(o.created_at)), h('td', null, o.customer, h('div', { class: 'hint' }, o.email)), sellerCell(o),
           h('td', null, o.delivery_speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : 'Standard',
             o.promised_at ? h('div', { class: 'hint' }, `Promised ${fmtWhen(o.promised_at)}`) : null, o.awb ? h('div', { class: 'hint' }, o.awb) : null),
           h('td', null, inr(o.total)), h('td', null, `${PAY_LABEL[o.payment_method] || o.payment_method} · ${o.payment_status}`),
-          h('td', null, STATUS_LABEL[o.status], o.status === 'delivery_failed' && o.reattempt ? h('div', { class: 'hint ok' }, `Buyer asked: ${o.reattempt}`) : null),
-          h('td', null, transitions[o.status].length ? h('select', { onchange: async (e) => {
+          h('td', null, o.hold_reason && o.status === 'placed' ? h('b', { class: 'low' }, 'On hold') : STATUS_LABEL[o.status],
+            o.hold_reason && o.status === 'placed' ? h('div', { class: 'hint' }, o.hold_reason) : null,
+            o.status === 'delivery_failed' && o.reattempt ? h('div', { class: 'hint ok' }, `Buyer asked: ${o.reattempt}`) : null),
+          h('td', null, o.hold_reason && o.status === 'placed' ? h('button', { class: 'btn btn-sm btn-outline', onclick: () => release(o) }, 'Checked: release') : null,
+            transitions[o.status].length ? h('select', { onchange: async (e) => {
             if (!e.target.value) return;
             try { await api('PATCH', `/admin/orders/${o.id}`, { status: e.target.value }); toast('Order updated. The buyer has been told.'); route(); } catch (ex) { fail(ex); }
           } }, h('option', { value: '' }, 'Move to…'), transitions[o.status].map((t) => h('option', { value: t }, STATUS_LABEL[t]))) : '—'))))));
@@ -1138,7 +1243,7 @@ async function viewAdmin(params) {
       modal.showModal();
     };
     const RS = { requested: 'New', pickup_scheduled: 'Pickup scheduled', refunded: 'Refunded', rejected: 'Rejected' };
-    body.append(returns.length ? h('div', { class: 'table-wrap' }, h('table', null,
+    add(body, returns.length ? h('div', { class: 'table-wrap' }, h('table', null,
       h('tr', null, ['Order #', 'Customer', 'Reason', 'Refund to', 'Status', 'Action'].map((t) => h('th', null, t))),
       returns.map((r) => h('tr', null, h('td', null, r.order_no, h('div', { class: 'hint' }, inr(r.total))), h('td', null, r.customer, h('div', { class: 'hint' }, r.email)),
         h('td', null, r.reason, r.comment ? h('div', { class: 'hint' }, r.comment) : null),
@@ -1160,7 +1265,7 @@ async function viewAdmin(params) {
         try { await api('POST', `/admin/tickets/${t.id}/reply`, { message: reply.value, close }); toast('Reply sent.'); location.hash = '#/admin?tab=helpdesk'; } catch (ex) { fail(ex); }
       };
       const who = { customer: t.customer, agent: 'Bazaario support', system: 'Automatic message' };
-      body.append(h('div', { class: 'card', style: { marginBottom: '16px' } },
+      add(body, h('div', { class: 'card', style: { marginBottom: '16px' } },
         h('p', null, h('a', { href: '#/admin?tab=helpdesk' }, 'All requests')),
         h('h3', null, `${t.ticket_no} · ${t.subject}`),
         h('p', { class: 'hint' }, `${categories[t.category]} · ${t.customer} (${t.email})${t.order_no ? ' · Order ' + t.order_no : ''} · ${TICKET_STATUS[t.status]}`),
@@ -1172,7 +1277,7 @@ async function viewAdmin(params) {
             h('button', { class: 'btn', onclick: () => send(true) }, 'Reply and close'))]));
     }
     const now = Date.now();
-    body.append(tickets.length ? h('div', { class: 'table-wrap' }, h('table', null,
+    add(body, tickets.length ? h('div', { class: 'table-wrap' }, h('table', null,
       h('tr', null, ['Request', 'Topic', 'Customer', 'Subject', 'Status', 'Reply due'].map((t) => h('th', null, t))),
       tickets.map((t) => h('tr', null, h('td', null, h('a', { href: `#/admin?tab=helpdesk&ticket=${t.id}` }, t.ticket_no)),
         h('td', null, categories[t.category]), h('td', null, t.customer), h('td', null, t.subject), h('td', null, TICKET_STATUS[t.status]),
@@ -1182,7 +1287,7 @@ async function viewAdmin(params) {
 
   if (tab === 'messages') {
     const { messages } = await api('GET', '/admin/messages');
-    body.append(h('p', { class: 'muted' }, 'Every SMS and email Bazaario sends to buyers. In test mode they are recorded here instead of being delivered.'),
+    add(body, h('p', { class: 'muted' }, 'Every SMS and email Bazaario sends to buyers. In test mode they are recorded here instead of being delivered.'),
       h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['Time', 'Channel', 'To', 'Order', 'Message'].map((t) => h('th', null, t))),
         messages.map((m) => h('tr', null, h('td', null, fmtWhen(m.created_at)), h('td', null, m.channel.toUpperCase(), h('div', { class: 'hint' }, m.provider)),
@@ -1224,7 +1329,7 @@ async function viewAdmin(params) {
       formBox.classList.remove('hidden');
       formBox.scrollIntoView();
     };
-    body.append(h('p', null, h('button', { class: 'btn btn-primary', onclick: () => openForm() }, 'Add a product')), formBox,
+    add(body, h('p', null, h('button', { class: 'btn btn-primary', onclick: () => openForm() }, 'Add a product')), formBox,
       h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['', 'Product', 'Category', 'Price', 'MRP', 'Stock', 'Status', ''].map((t) => h('th', null, t))),
         products.map((p) => h('tr', null, h('td', null, pic(p, 'pimg thumb')), h('td', null, h('a', { href: `#/p/${p.id}` }, p.title), h('div', { class: 'hint' }, p.brand)),
@@ -1233,9 +1338,11 @@ async function viewAdmin(params) {
           h('td', null, h('button', { class: 'btn btn-sm btn-outline', onclick: () => openForm(p) }, 'Edit')))))));
   }
 
+  if (['sellers', 'qc', 'claims', 'settlement'].includes(tab)) await studioMarket(tab, body, qp);
+
   if (tab === 'customers') {
     const { users } = await api('GET', '/admin/users');
-    body.append(h('div', { class: 'table-wrap' }, h('table', null,
+    add(body, h('div', { class: 'table-wrap' }, h('table', null,
       h('tr', null, ['Name', 'Email', 'Mobile', 'Role', 'Orders', 'Joined', 'Status'].map((t) => h('th', null, t))),
       users.map((u) => h('tr', null, h('td', null, u.name), h('td', null, u.email), h('td', null, u.phone || '—'), h('td', null, u.role),
         h('td', null, u.orders), h('td', null, fmtDate(u.created_at)), h('td', null, u.locked_until > Date.now() ? 'Locked' : 'Active'))))));
@@ -1249,7 +1356,7 @@ async function viewAdmin(params) {
     const maxD = h('input', { type: 'number', min: 1, placeholder: 'Optional' });
     const minO = h('input', { type: 'number', min: 0, value: 0 });
     const desc = h('input', { maxLength: 200 });
-    body.append(h('div', { class: 'card', style: { marginBottom: '16px' } }, h('h3', null, 'Create / update coupon'),
+    add(body, h('div', { class: 'card', style: { marginBottom: '16px' } }, h('h3', null, 'Create / update coupon'),
       h('form', { onsubmit: async (e) => {
         e.preventDefault();
         try { await api('POST', '/admin/coupons', { code: code.value, kind: kind.value, value: Number(value.value), maxDiscount: maxD.value ? Number(maxD.value) : undefined, minOrder: Number(minO.value), description: desc.value }); toast('Coupon saved.'); route(); } catch (ex) { fail(ex); }
@@ -1266,7 +1373,7 @@ async function viewAdmin(params) {
 
   if (tab === 'audit') {
     const { entries } = await api('GET', '/admin/audit');
-    body.append(h('div', { class: 'table-wrap' }, h('table', null,
+    add(body, h('div', { class: 'table-wrap' }, h('table', null,
       h('tr', null, ['Time', 'User', 'Action', 'Detail', 'IP'].map((t) => h('th', null, t))),
       entries.map((a) => h('tr', null, h('td', null, new Date(a.created_at).toLocaleString('en-IN')), h('td', null, a.email || '—'),
         h('td', null, a.action), h('td', { class: 'hint' }, a.detail || ''), h('td', null, a.ip))))));
@@ -1286,7 +1393,7 @@ async function shrinkPhoto(file) {
 }
 
 /** Bazaario Studio photo picker: upload from the device or paste a link to an image. */
-function photoField(f, p) {
+function photoField(f, p, uploadPath = '/admin/uploads') {
   f.image = h('input', { type: 'text', inputMode: 'url', value: p ? p.image || '' : '', placeholder: 'https://… (or upload a photo)', maxLength: 1000 });
   const preview = h('div', { class: 'photo-preview' });
   const paint = () => preview.replaceChildren(f.image.value ? h('img', { src: f.image.value, alt: 'Product photo preview' }) : h('span', { class: 'muted small' }, 'No photo yet'));
@@ -1296,7 +1403,7 @@ function photoField(f, p) {
     if (!file.files[0]) return;
     try {
       toast('Uploading photo…');
-      const { url } = await api('POST', '/admin/uploads', { dataUrl: await shrinkPhoto(file.files[0]) });
+      const { url } = await api('POST', uploadPath, { dataUrl: await shrinkPhoto(file.files[0]) });
       f.image.value = url; paint(); toast('Photo added. Save the product to keep it.');
     } catch (e) { fail(e); }
     file.value = '';
@@ -1412,7 +1519,7 @@ function policyPages() {
   return {
     about: ['Our story', [['', 'Bazaario brings the warmth of an Indian bazaar online: handpicked brands, honest prices and delivery to your doorstep, from Express deliveries in under 90 minutes to every PIN code in India.']]],
     careers: ['Careers', [['', 'We are hiring engineers, designers and operations specialists across India.']]],
-    sell: ['Sell on Bazaario', [['', 'Seller registration opens soon. Brands, regular sellers, small manufacturers and local shops will each have their own plan, with Bazaario handling payments and delivery.']]],
+    sell: ['Sell on Bazaario', [['', 'Brands, sellers and small manufacturers can register in a few minutes from the Sell on Bazaario page. Local shops join with Express delivery soon.']]],
     protection: ['Buyer protection', [['', 'Secure payments, genuine products and easy returns. If an item arrives damaged or different from what you ordered, return it within the return window for a full refund.']]],
     terms: ['Terms of use', [
       ['Who we are', `This store is run by ${co}. By using it you agree to these terms.`],
@@ -1521,7 +1628,7 @@ async function route() {
     p: () => viewProduct(parts[1]),
     cart: () => viewCart(),
     checkout: () => viewCheckout(),
-    orders: () => (parts[1] ? viewOrder(parts[1], query) : viewOrders()),
+    orders: () => (parts[1] ? viewOrder(parts[1], query) : viewOrders(query)),
     wishlist: () => viewWishlist(),
     login: () => viewLogin(query),
     register: () => viewRegister(query),
@@ -1533,6 +1640,9 @@ async function route() {
     help: () => (parts[1] === 't' ? viewTicket(parts[2]) : viewHelp(query)),
     wallet: () => viewWallet(),
     app: () => viewApp(),
+    sell: () => viewSell(),
+    seller: () => viewSellerHub(query),
+    doc: () => viewDocument(parts[1], parts[2], query),
   };
   const view = routes[parts[0] || ''];
   if (!view) { viewPage('missing'); return; }

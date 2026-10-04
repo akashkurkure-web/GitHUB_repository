@@ -91,16 +91,24 @@ router.delete('/cart/:productId', (req, res) => {
 /** Merge a guest (signed-out) cart into the account after sign-in. */
 router.post('/cart/merge', (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 50) : [];
-  const upsert = db.get().prepare(`INSERT INTO cart_items (user_id, product_id, qty, saved_for_later, added_at) VALUES (?,?,?,0,?)
-    ON CONFLICT(user_id, product_id) DO UPDATE SET qty = MIN(?, MAX(cart_items.qty, excluded.qty))`);
+  const upsert = db.get().prepare(`INSERT INTO cart_items (user_id, product_id, qty, saved_for_later, added_at, offer_id) VALUES (?,?,?,0,?,?)
+    ON CONFLICT(user_id, product_id) DO UPDATE SET qty = MIN(?, MAX(cart_items.qty, excluded.qty)), offer_id = COALESCE(excluded.offer_id, cart_items.offer_id)`);
   for (const it of items) {
     const productId = Number(it && it.productId);
     const qty = Number(it && it.qty);
     if (!Number.isInteger(productId) || !Number.isInteger(qty) || qty < 1) continue;
     const p = db.get().prepare('SELECT stock FROM products WHERE id = ? AND active = 1').get(productId);
-    if (!p || p.stock < 1) continue;
-    const capped = Math.min(qty, p.stock, config.maxQtyPerItem);
-    upsert.run(req.user.id, productId, capped, Date.now(), Math.min(p.stock, config.maxQtyPerItem));
+    if (!p) continue;
+    // A seller picked while signed out is kept if that seller still sells the item.
+    let offerId = null;
+    let stock = p.stock;
+    if (Number.isInteger(Number(it.offerId)) && Number(it.offerId) > 0) {
+      const o = market.offerById(db.get(), Number(it.offerId));
+      if (o && o.product_id === productId && o.active && o.status === 'approved') { offerId = o.id; stock = o.stock; }
+    }
+    if (stock < 1) continue;
+    const capped = Math.min(qty, stock, config.maxQtyPerItem);
+    upsert.run(req.user.id, productId, capped, Date.now(), offerId, Math.min(stock, config.maxQtyPerItem));
   }
   res.json(cartView(req.user.id));
 });

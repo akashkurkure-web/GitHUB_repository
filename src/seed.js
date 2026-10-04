@@ -68,7 +68,7 @@ const COUPONS = [
 ];
 
 const DESCRIPTION = (title, brand) =>
-  `${title} by ${brand}. Sold and fulfilled by ${config.storeName}. Covered by our ${config.returnWindowDays}-day easy return policy and 100% purchase protection.`;
+  `${title} by ${brand}. Covered by our ${config.returnWindowDays}-day easy return policy and 100% purchase protection.`;
 
 // Drawn by scripts/draw-products.js, in the same order as PRODUCTS.
 const PICTURES = [
