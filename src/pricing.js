@@ -8,6 +8,7 @@ const market = require('./market');
 const geo = require('./geo');
 const hyper = require('./hyperlocal');
 const resell = require('./resell');
+const growth = require('./growth');
 
 /**
  * Server-side source of truth for the bag. Client-sent prices are never trusted.
@@ -17,9 +18,11 @@ const resell = require('./resell');
  * shop could bring by Express carry that option as `nearby`.
  * A line added from a reseller's share costs the offer price plus the reseller's margin.
  */
-function cartLines(userId, { state = null, pincode = null, now = Date.now() } = {}) {
+function cartLines(userId, { state = null, pincode = null, now = Date.now(), plus = null } = {}) {
   const d = db.get();
   const point = pincode ? geo.locate(pincode) : null;
+  // Sale events: Bazaario takes the discount off the seller's own price (the reseller's margin is not discounted).
+  const sales = growth.liveSales(d, { plus: plus === null ? !!growth.membership(d, userId, now) : plus, now });
   const rows = d.prepare(
     `SELECT c.product_id, c.qty, c.offer_id AS chosen_offer_id, c.share_id, p.title, p.price AS list_price, p.mrp, p.emoji, p.color, p.image,
             p.active, p.express, p.hsn, p.gst_rate, cat.slug AS category
@@ -55,6 +58,7 @@ function cartLines(userId, { state = null, pincode = null, now = Date.now() } = 
     const share = r.share_id ? resell.shareById(d, r.share_id) : null;
     const margin = share && offer ? resell.fitMargin(share.margin, offer.price, r.mrp) : 0;
     if (r.share_id && !share) note = note || 'The reseller link for this item has ended, so it is shown at the Bazaario price.';
+    const sale = offer ? sales.get(r.product_id) || null : null;
     return {
       product_id: r.product_id, qty: r.qty, title: r.title, mrp: r.mrp, emoji: r.emoji, color: r.color, image: r.image,
       category: r.category, hsn: r.hsn, gst_rate: r.gst_rate,
@@ -75,6 +79,8 @@ function cartLines(userId, { state = null, pincode = null, now = Date.now() } = 
       // Express comes from Bazaario's city stores (Direct stock) or from a partner shop near the buyer.
       express: offer && (offer.lane === 'shop' || (offer.lane === 'direct' && r.express)) ? 1 : 0,
       shop, nearby,
+      sale: sale ? { name: sale.name, slug: sale.slug, pct: sale.pct, endsAt: sale.endsAt, early: sale.early } : null,
+      sale_off: sale ? growth.saleOff(offer.price, sale.pct) : 0,
       chosen: !!r.chosen_offer_id,
       blocked, note,
     };
@@ -94,10 +100,27 @@ function packagesOf(lines) {
   return [...map.values()];
 }
 
-function couponDiscount(code, subtotal) {
+/**
+ * A coupon's discount on `subtotal` (after sale prices). Campaign rules: a start and end date, a limit per buyer and
+ * in total, first order only, or Bazaario Plus members only.
+ */
+function couponDiscount(code, subtotal, { userId = null, plus = false, now = Date.now() } = {}) {
   if (!code) return { discount: 0, coupon: null };
-  const c = db.get().prepare('SELECT * FROM coupons WHERE code = ? AND active = 1').get(String(code).trim());
+  const d = db.get();
+  const c = d.prepare('SELECT * FROM coupons WHERE code = ? AND active = 1').get(String(code).trim());
   if (!c) throw new HttpError(400, 'This coupon code is not valid.');
+  if (c.starts_at && now < c.starts_at) throw new HttpError(400, `${c.code} starts on ${new Date(c.starts_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long' })}.`);
+  if (c.ends_at && now >= c.ends_at) throw new HttpError(400, `${c.code} has ended.`);
+  if (c.plus_only && !plus) throw new HttpError(400, `${c.code} is for Bazaario Plus members.`);
+  // Uses are counted per checkout, so a bag split into several packages counts once.
+  const uses = (where, ...p) => d.prepare(`SELECT COUNT(DISTINCT COALESCE(checkout_ref, order_no)) AS n FROM orders WHERE coupon_code = ? COLLATE NOCASE AND status != 'cancelled' ${where}`).get(c.code, ...p).n;
+  if (c.max_uses && uses('') >= c.max_uses) throw new HttpError(400, `${c.code} has been fully used.`);
+  if (userId && c.per_user_limit && uses('AND user_id = ?', userId) >= c.per_user_limit) {
+    throw new HttpError(400, c.per_user_limit === 1 ? `You have already used ${c.code}.` : `You have used ${c.code} ${c.per_user_limit} times, which is its limit.`);
+  }
+  if (userId && c.first_order_only && d.prepare("SELECT 1 FROM orders WHERE user_id = ? AND status != 'cancelled' LIMIT 1").get(userId)) {
+    throw new HttpError(400, `${c.code} is for your first order.`);
+  }
   if (subtotal < c.min_order) {
     throw new HttpError(400, `Add items worth ₹${((c.min_order - subtotal) / 100).toFixed(2)} more to use ${c.code}.`);
   }
@@ -124,11 +147,17 @@ function codCheck(userId, pincode, payable) {
  */
 function quote(userId, couponCode, paymentMethod, opts = {}) {
   const now = Date.now();
-  const lines = cartLines(userId, { state: opts.state, pincode: opts.pincode, now });
+  const member = growth.membership(db.get(), userId, now);
+  const lines = cartLines(userId, { state: opts.state, pincode: opts.pincode, now, plus: !!member });
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const mrpTotal = lines.reduce((s, l) => s + l.mrp * l.qty, 0);
-  const { discount, coupon } = couponDiscount(couponCode, subtotal);
-  const shipping = subtotal === 0 || subtotal >= config.freeShippingThreshold ? 0 : config.shippingFee;
+  const saleDiscount = lines.reduce((s, l) => s + l.sale_off * l.qty, 0);
+  const { discount: couponOff, coupon } = couponDiscount(couponCode, subtotal - saleDiscount, { userId, plus: !!member, now });
+  const discount = couponOff + saleDiscount;
+  // Bazaario Plus: free Standard delivery on every order.
+  const freeShip = subtotal === 0 || subtotal - saleDiscount >= config.freeShippingThreshold;
+  const shipping = freeShip || member ? 0 : config.shippingFee;
+  const shippingSaved = !freeShip && member ? config.shippingFee : 0;
   const packages = packagesOf(lines);
   // Partner shop packages always come by Express; the speed the buyer picks applies to everything else.
   const nationalLines = lines.filter((l) => l.lane !== 'shop');
@@ -148,7 +177,9 @@ function quote(userId, couponCode, paymentMethod, opts = {}) {
     p.promisedAt = p.lane === 'shop' ? shopReady(p)
       : speed === 'express' ? chosen.promisedAt : delivery.standardPromise(delivery.zoneOf(opts.pincode).days + p.extraDays, now);
   }
-  const expressFee = packages.some((p) => p.speed === 'express') ? config.expressFee : 0;
+  const anyExpress = packages.some((p) => p.speed === 'express');
+  const expressFee = anyExpress ? (member ? config.plus.expressFee : config.expressFee) : 0;
+  if (member) speeds = speeds.map((o) => (o.speed === 'express' ? { ...o, fee: config.plus.expressFee } : o));
   const codFee = paymentMethod === 'cod' ? config.codFee : 0;
   const total = subtotal - discount + shipping + expressFee + codFee;
   const walletBalance = wallet.balance(userId);
@@ -157,7 +188,8 @@ function quote(userId, couponCode, paymentMethod, opts = {}) {
   return {
     lines, packages: packages.map((p) => ({ ...p, lines: p.lines.map((l) => l.product_id) })),
     blocked: lines.filter((l) => l.blocked).map((l) => `${l.title}: ${l.blocked}`),
-    subtotal, mrpTotal, savings: mrpTotal - subtotal + discount, discount, coupon, shipping, expressFee, codFee, total,
+    subtotal, mrpTotal, savings: mrpTotal - subtotal + discount + shippingSaved, discount, couponDiscount: couponOff, saleDiscount, coupon, shipping, expressFee, codFee, total,
+    plus: member ? { endsAt: member.ends_at, shippingSaved, expressSaved: anyExpress ? config.expressFee - config.plus.expressFee : 0 } : null,
     walletBalance, walletApplied, payable,
     speed, promisedAt: chosen ? chosen.promisedAt : null, speeds, shopPackages: shopPacks.length,
     cod: codCheck(userId, opts.pincode, payable),

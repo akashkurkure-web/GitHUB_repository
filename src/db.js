@@ -400,6 +400,82 @@ CREATE TABLE IF NOT EXISTS reseller_payouts (
   created_at INTEGER NOT NULL
 );
 
+-- ---------- Growth and loyalty (blueprint stage 12) ----------
+-- Bazaario Plus memberships. A member has a row whose period covers now.
+CREATE TABLE IF NOT EXISTS memberships (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan TEXT NOT NULL CHECK (plan IN ('monthly','yearly')),
+  amount INTEGER NOT NULL,
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  auto_renew INTEGER NOT NULL DEFAULT 1,
+  payment_method TEXT NOT NULL,
+  payment_ref TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memberships_user ON memberships(user_id, ends_at);
+
+-- Sale events (Bazaario Utsav, payday sales): a discount on chosen products for a time, funded by Bazaario.
+CREATE TABLE IF NOT EXISTS sales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  tagline TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  early_hours INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sale_items (
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  pct INTEGER NOT NULL CHECK (pct BETWEEN 1 AND 90),
+  PRIMARY KEY (sale_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  referrer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  referee_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('pending','rewarded')),
+  order_id INTEGER,
+  created_at INTEGER NOT NULL,
+  rewarded_at INTEGER
+);
+
+-- Sponsored listings: a seller pays per click to show a product at the top of search, marked "Sponsored".
+CREATE TABLE IF NOT EXISTS ad_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seller_id INTEGER NOT NULL REFERENCES sellers(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  bid INTEGER NOT NULL,
+  daily_budget INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active','paused')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (seller_id, product_id)
+);
+CREATE TABLE IF NOT EXISTS ad_clicks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id INTEGER NOT NULL REFERENCES ad_campaigns(id) ON DELETE CASCADE,
+  viewer TEXT NOT NULL,
+  cost INTEGER NOT NULL,
+  payout_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ad_clicks ON ad_clicks(campaign_id, created_at);
+
+-- Win-back messages already sent, so nobody gets the same reminder twice.
+CREATE TABLE IF NOT EXISTS winback_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('cart','price_drop','back_in_stock')),
+  product_id INTEGER,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -472,6 +548,21 @@ const ADDED_COLUMNS = [
   ['order_items', 'share_id', 'INTEGER'],
   ['order_items', 'reseller_margin', 'INTEGER NOT NULL DEFAULT 0'],
   ['order_items', 'reseller_payout_id', 'INTEGER'],
+  // Growth and loyalty: referral code, marketing consent, coupon rules, wishlist alerts, sale discount, Plus, ad spend.
+  ['users', 'referral_code', 'TEXT'],
+  ['users', 'marketing_opt_in', 'INTEGER NOT NULL DEFAULT 1'],
+  ['coupons', 'starts_at', 'INTEGER'],
+  ['coupons', 'ends_at', 'INTEGER'],
+  ['coupons', 'per_user_limit', 'INTEGER'],
+  ['coupons', 'max_uses', 'INTEGER'],
+  ['coupons', 'first_order_only', 'INTEGER NOT NULL DEFAULT 0'],
+  ['coupons', 'plus_only', 'INTEGER NOT NULL DEFAULT 0'],
+  ['wishlist', 'price_at_add', 'INTEGER'],
+  ['wishlist', 'stock_at_add', 'INTEGER'],
+  ['orders', 'sale_discount', 'INTEGER NOT NULL DEFAULT 0'],
+  ['orders', 'plus', 'INTEGER NOT NULL DEFAULT 0'],
+  ['orders', 'plus_saved', 'INTEGER NOT NULL DEFAULT 0'],
+  ['payouts', 'ad_spend', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /** Brings databases created by older versions up to the current schema. */
@@ -533,6 +624,7 @@ function migrate(d) {
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_checkout ON orders(checkout_ref)');
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_rider ON orders(rider_id)');
   if (exists('order_items')) d.exec('CREATE INDEX IF NOT EXISTS idx_items_share ON order_items(share_id)');
+  if (exists('users')) d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral ON users(referral_code)');
   // Every product gets a Bazaario Direct offer from its old price and stock (needs the market module, loaded late).
   if (exists('sellers')) require('./market').backfill(d);
 }

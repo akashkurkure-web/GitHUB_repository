@@ -126,6 +126,20 @@ module.exports = {
     tdsPct: 2,
     tdsThreshold: 2000000,
   },
+
+  // ---------- Growth and loyalty (blueprint stage 12) ----------
+  plus: {
+    // Bazaario Plus: free Standard delivery on every order, a lower Express fee and early access to sales.
+    plans: { monthly: { price: 9900, months: 1 }, yearly: { price: 99900, months: 12 } },
+    expressFee: 1900,
+    earlyHours: 24,
+  },
+  // Referrals: both people get wallet money once the friend's first order is delivered.
+  referral: { referrerReward: 10000, friendReward: 10000, maxPerMonth: 20 },
+  // Sponsored listings: sellers pay per click, between these bids (paise), within a daily budget.
+  ads: { minBid: 200, maxBid: 5000, minDailyBudget: 10000, slots: 2 },
+  // Win-back messages: abandoned bags after this many hours, wishlist price drops of at least this share.
+  winback: { cartHours: 24, cartMaxDays: 7, priceDropPct: 5, repeatDays: 3 },
   adminEmail: env.ADMIN_EMAIL || 'admin@bazaario.local',
   adminPassword: env.ADMIN_PASSWORD || null,
 };

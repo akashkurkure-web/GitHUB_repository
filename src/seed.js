@@ -177,6 +177,41 @@ function seedExpress(d, now) {
   }
 }
 
+/**
+ * Growth demo data (blueprint stage 12): Bazaario Utsav running now, a Payday Sale at the start of next month
+ * (Plus members get in a day early), campaign coupons, and one seller promoting two products in search.
+ */
+function seedGrowth(d, now) {
+  if (!d.prepare('SELECT 1 FROM sales LIMIT 1').get()) {
+    const IST = 330 * 60000;
+    const t = new Date(now + IST);
+    const today = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) - IST;
+    const payday = Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 1) - IST;
+    const insSale = d.prepare('INSERT INTO sales (slug, name, tagline, starts_at, ends_at, early_hours, active, created_at) VALUES (?,?,?,?,?,?,1,?)');
+    const insItem = d.prepare('INSERT INTO sale_items (sale_id, product_id, pct) VALUES (?,?,?)');
+    const ids = d.prepare('SELECT id FROM products WHERE active = 1 ORDER BY id').all().map((r) => r.id);
+    const utsav = Number(insSale.run('utsav', 'Bazaario Utsav', 'Festive prices on phones, fashion, home and more, for ten days.',
+      today - 86400_000, today + 10 * 86400_000, 24, now).lastInsertRowid);
+    ids.filter((_, i) => i % 3 === 0).forEach((id, i) => insItem.run(utsav, id, [10, 15, 20, 25, 30, 40][i % 6]));
+    const pay = Number(insSale.run('payday', 'Payday Sale', 'Salary day treats for three days. Plus members shop a day early.',
+      payday, payday + 3 * 86400_000, 24, now).lastInsertRowid);
+    ids.filter((_, i) => i % 4 === 1).forEach((id, i) => insItem.run(pay, id, [10, 15, 20][i % 3]));
+  }
+  const camp = d.prepare(`INSERT OR IGNORE INTO coupons (code, kind, value, max_discount, min_order, description, per_user_limit, first_order_only, plus_only, active)
+    VALUES (?,?,?,?,?,?,?,?,?,1)`);
+  camp.run('FIRST150', 'flat', 15000, null, 99900, '₹150 off your first order above ₹999', 1, 1, 0);
+  camp.run('PLUS200', 'flat', 20000, null, 149900, 'Plus members: ₹200 off orders above ₹1,499', 2, 0, 1);
+  if (!d.prepare('SELECT 1 FROM ad_campaigns LIMIT 1').get()) {
+    const seller = d.prepare("SELECT id FROM sellers WHERE code != 'direct' AND lane != 'shop' AND status = 'approved' ORDER BY id LIMIT 1").get();
+    if (seller) {
+      const ins = d.prepare("INSERT OR IGNORE INTO ad_campaigns (seller_id, product_id, bid, daily_budget, status, created_at, updated_at) VALUES (?,?,?,?,'active',?,?)");
+      for (const o of d.prepare('SELECT product_id FROM offers WHERE seller_id = ? AND active = 1 AND stock > 0 ORDER BY id LIMIT 2').all(seller.id)) {
+        ins.run(seller.id, o.product_id, 500, 50000, now, now);
+      }
+    }
+  }
+}
+
 const pictureOf = (i) => (PICTURES[i] ? `img/products/${PICTURES[i]}.svg` : '');
 
 function seed({ reset = false, log = console.log } = {}) {
@@ -187,7 +222,8 @@ function seed({ reset = false, log = console.log } = {}) {
             DELETE FROM order_items; DELETE FROM orders; DELETE FROM reviews; DELETE FROM cart_items; DELETE FROM wishlist; DELETE FROM offers;
             DELETE FROM addresses; DELETE FROM sessions; DELETE FROM products; DELETE FROM categories; DELETE FROM coupons; DELETE FROM sellers;
             DELETE FROM otp_codes; DELETE FROM audit_log; DELETE FROM rider_payouts; DELETE FROM riders; DELETE FROM reseller_payouts;
-            DELETE FROM reseller_shares; DELETE FROM resellers; DELETE FROM users;`);
+            DELETE FROM reseller_shares; DELETE FROM resellers; DELETE FROM ad_clicks; DELETE FROM ad_campaigns; DELETE FROM referrals;
+            DELETE FROM winback_log; DELETE FROM memberships; DELETE FROM sale_items; DELETE FROM sales; DELETE FROM users;`);
   }
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
   if (already > 0) {
@@ -196,6 +232,7 @@ function seed({ reset = false, log = console.log } = {}) {
     PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
     // Stores from before Express riders and partner shops get them now.
     db.tx((t) => seedExpress(t, Date.now()));
+    db.tx((t) => seedGrowth(t, Date.now()));
     return;
   }
 
@@ -218,6 +255,7 @@ function seed({ reset = false, log = console.log } = {}) {
     market.backfill(d);
     seedSellers(d, now);
     seedExpress(d, now);
+    seedGrowth(d, now);
 
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);

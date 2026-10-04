@@ -139,13 +139,18 @@ router.get('/wishlist', (req, res) => {
     `SELECT p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.emoji, p.color, p.image, p.express
        FROM wishlist w JOIN products p ON p.id = w.product_id WHERE w.user_id = ? AND p.active = 1 ORDER BY w.added_at DESC`
   ).all(req.user.id);
+  const growth = require('../growth');
+  growth.applySales(db.get(), items, { plus: !!growth.membership(db.get(), req.user.id) });
   res.json({ items });
 });
 
 router.post('/wishlist', (req, res) => {
   const productId = v.int(req.body.productId, 'Product', { min: 1 });
   productForCart(productId);
-  db.get().prepare('INSERT OR IGNORE INTO wishlist (user_id, product_id, added_at) VALUES (?,?,?)').run(req.user.id, productId, Date.now());
+  // The price and stock when saved, so we can tell the buyer when it drops or comes back (win-back messages).
+  const p = db.get().prepare('SELECT price, stock FROM products WHERE id = ?').get(productId);
+  db.get().prepare('INSERT OR IGNORE INTO wishlist (user_id, product_id, added_at, price_at_add, stock_at_add) VALUES (?,?,?,?,?)')
+    .run(req.user.id, productId, Date.now(), p.price, p.stock);
   res.status(201).json({ ok: true });
 });
 

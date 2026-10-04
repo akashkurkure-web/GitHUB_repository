@@ -59,7 +59,9 @@ function upcoming(d, sellerId, now = Date.now()) {
     ready: o.status === 'delivered' && releaseAt(o, seller.lane) <= now, onHold: o.status === 'return_requested', ...breakdown(d, o, seller) }));
   const claims = d.prepare("SELECT c.id, c.amount, c.reason, o.order_no FROM claims c JOIN orders o ON o.id = c.order_id WHERE c.seller_id = ? AND c.status = 'approved' AND c.payout_id IS NULL")
     .all(sellerId);
-  return { lines, claims, net: lines.reduce((s, l) => s + l.net, 0) + claims.reduce((s, c) => s + c.amount, 0) };
+  // Sponsored listing clicks are taken from the next payout.
+  const adSpend = require('./growth').unbilledAdSpend(d, sellerId);
+  return { lines, claims, adSpend, net: lines.reduce((s, l) => s + l.net, 0) + claims.reduce((s, c) => s + c.amount, 0) - adSpend };
 }
 
 const sum = (rows, k) => rows.reduce((s, r) => s + r[k], 0);
@@ -79,7 +81,9 @@ function run(d, now = Date.now()) {
     const adjustments = sum(mine, 'amount');
     const totals = { gross: sum(lines, 'gross'), commission: sum(lines, 'commission'), fees: sum(lines, 'fees'), gstOnFees: sum(lines, 'gstOnFees'),
       tcs: sum(lines, 'tcs'), tds: sum(lines, 'tds') };
-    const net = sum(lines, 'net') + adjustments;
+    const adSpend = require('./growth').unbilledAdSpend(d, sellerId);
+    const net = sum(lines, 'net') + adjustments - adSpend;
+    // Nothing is paid until earnings cover the ad spend; the clicks wait for the next run.
     if (net <= 0) continue;
     const ymd = new Date(now + 330 * 60000).toISOString().slice(0, 10).replace(/-/g, '');
     const no = `PO-${ymd}-${seller.code}-${crypto.randomInt(1000, 10000)}`;
@@ -87,6 +91,10 @@ function run(d, now = Date.now()) {
     const payoutId = Number(d.prepare(`INSERT INTO payouts (payout_no, seller_id, gross, commission, fees, gst_on_fees, tcs, tds, adjustments, net, status, utr, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,'paid',?,?)`).run(no, sellerId, totals.gross, totals.commission, totals.fees, totals.gstOnFees, totals.tcs, totals.tds,
       adjustments, net, utr, now).lastInsertRowid);
+    if (adSpend) {
+      d.prepare('UPDATE payouts SET ad_spend = ? WHERE id = ?').run(adSpend, payoutId);
+      d.prepare(`UPDATE ad_clicks SET payout_id = ? WHERE payout_id IS NULL AND campaign_id IN (SELECT id FROM ad_campaigns WHERE seller_id = ?)`).run(payoutId, sellerId);
+    }
     const insLine = d.prepare(`INSERT INTO payout_lines (payout_id, order_id, claim_id, gross, commission, fees, gst_on_fees, tcs, tds, adjustment, net)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
     for (const l of lines) {

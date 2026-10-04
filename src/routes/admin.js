@@ -241,10 +241,25 @@ router.post('/coupons', (req, res) => {
   const maxDiscount = v.int(req.body.maxDiscount, 'Max discount (₹)', { min: 1, max: 100000, optional: true });
   const minOrder = v.int(req.body.minOrder, 'Minimum order (₹)', { min: 0, max: 1000000, optional: true, def: 0 });
   const description = v.str(req.body.description, 'Description', { max: 200, optional: true });
-  db.get().prepare(`INSERT INTO coupons (code, kind, value, max_discount, min_order, description, active) VALUES (?,?,?,?,?,?,1)
+  // Campaign rules (blueprint stage 12): when it runs, how often it can be used, and who can use it.
+  const when = (x, field) => {
+    if (x === undefined || x === null || x === '') return null;
+    const t = Number(x);
+    if (!Number.isFinite(t) || t <= 0) throw new HttpError(400, `${field} is not a valid date.`);
+    return t;
+  };
+  const startsAt = when(req.body.startsAt, 'Starts');
+  const endsAt = when(req.body.endsAt, 'Ends');
+  if (startsAt && endsAt && endsAt <= startsAt) throw new HttpError(400, 'The coupon must end after it starts.');
+  const perUserLimit = v.int(req.body.perUserLimit, 'Uses per buyer', { min: 1, max: 100, optional: true }) ?? null;
+  const maxUses = v.int(req.body.maxUses, 'Total uses', { min: 1, max: 1000000, optional: true }) ?? null;
+  db.get().prepare(`INSERT INTO coupons (code, kind, value, max_discount, min_order, description, active, starts_at, ends_at, per_user_limit, max_uses, first_order_only, plus_only)
+    VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)
     ON CONFLICT(code) DO UPDATE SET kind=excluded.kind, value=excluded.value, max_discount=excluded.max_discount,
-    min_order=excluded.min_order, description=excluded.description, active=1`)
-    .run(code, kind, value, maxDiscount ? maxDiscount * 100 : null, minOrder * 100, description);
+    min_order=excluded.min_order, description=excluded.description, active=1, starts_at=excluded.starts_at, ends_at=excluded.ends_at,
+    per_user_limit=excluded.per_user_limit, max_uses=excluded.max_uses, first_order_only=excluded.first_order_only, plus_only=excluded.plus_only`)
+    .run(code, kind, value, maxDiscount ? maxDiscount * 100 : null, minOrder * 100, description, startsAt, endsAt, perUserLimit, maxUses,
+      req.body.firstOrderOnly ? 1 : 0, req.body.plusOnly ? 1 : 0);
   audit(req, 'admin.coupon_upsert', { code });
   res.status(201).json({ ok: true });
 });

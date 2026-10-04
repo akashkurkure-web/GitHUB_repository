@@ -5,9 +5,13 @@ const delivery = require('../delivery');
 const market = require('../market');
 const geo = require('../geo');
 const hyper = require('../hyperlocal');
+const growth = require('../growth');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 const router = express.Router();
+
+// Sale prices are shown to everyone while a sale is on, and to Bazaario Plus members during early access.
+const isPlus = (req) => !!(req.user && growth.membership(db.get(), req.user.id));
 
 // p.express is shown only while Bazaario Direct has the best offer: Express comes from our own city stores.
 const PRODUCT_COLS = `p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.sold_count,
@@ -62,6 +66,19 @@ router.get('/products', (req, res) => {
   const total = db.get().prepare(`SELECT COUNT(*) AS n ${from}`).get(...params).n;
   const items = db.get().prepare(`SELECT ${PRODUCT_COLS} ${from} ORDER BY ${SORTS[sort]} LIMIT ? OFFSET ?`)
     .all(...params, pageSize, (page - 1) * pageSize);
+  const plus = isPlus(req);
+  growth.applySales(db.get(), items, { plus });
+
+  // Sponsored listings (marked "Sponsored"): on the first page of a search or a category, from matching products.
+  let sponsored = [];
+  if (page === 1 && (q || category)) {
+    const ids = db.get().prepare(`SELECT p.id ${from} LIMIT 300`).all(...params).map((r) => r.id);
+    const ads = growth.sponsored(db.get(), ids);
+    if (ads.length) {
+      const one = db.get().prepare(`SELECT ${PRODUCT_COLS} FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?`);
+      sponsored = growth.applySales(db.get(), ads.map((a) => ({ ...one.get(a.product_id), campaignId: a.id })), { plus });
+    }
+  }
 
   // Brand facet for the filter sidebar: same query minus the brand filter itself.
   const facetWhere = [];
@@ -77,7 +94,7 @@ router.get('/products', (req, res) => {
       WHERE ${facetWhere.join(' AND ')} GROUP BY p.brand ORDER BY n DESC, p.brand LIMIT 15`
   ).all(...facetParams);
 
-  res.json({ items, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)), brands: brandFacet });
+  res.json({ items, sponsored, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)), brands: brandFacet });
 });
 
 router.get('/products/suggest', (req, res) => {
@@ -125,10 +142,13 @@ router.get('/products/:id', (req, res) => {
     extraDays: market.extraDays(o), express: o.lane === 'direct' && !!p.express, seller: market.publicSeller(sellerRow.get(o.seller_id)),
   }));
   p.offers = offers;
+  const plus = isPlus(req);
+  growth.applySales(db.get(), [p], { plus });
+  if (p.sale) for (const o of offers) { o.was = o.price; o.price -= growth.saleOff(o.price, p.sale.pct); }
   const pin = typeof req.query.pin === 'string' && /^[1-9][0-9]{5}$/.test(req.query.pin) ? req.query.pin : null;
   const point = pin ? geo.locate(pin) : null;
   p.nearby = hyper.nearbyOffers(db.get(), id, point).slice(0, 3).map((n) => ({
-    offerId: n.offer.id, price: n.offer.price, stock: n.offer.stock, sellerName: n.offer.seller_name, ok: n.ok,
+    offerId: n.offer.id, price: n.offer.price - (p.sale ? growth.saleOff(n.offer.price, p.sale.pct) : 0), stock: n.offer.stock, sellerName: n.offer.seller_name, ok: n.ok,
     km: Math.round(n.km * 10) / 10, mins: n.mins, promisedAt: n.promisedAt, reason: n.reason,
   }));
   p.expressCity = point ? point.city : null;
@@ -142,6 +162,7 @@ router.get('/products/:id', (req, res) => {
   const related = db.get().prepare(`SELECT ${PRODUCT_COLS} FROM products p JOIN categories c ON c.id = p.category_id
      WHERE p.category_id = (SELECT category_id FROM products WHERE id = ?) AND p.id != ? AND p.active = 1
      ORDER BY p.sold_count DESC LIMIT 6`).all(id, id);
+  growth.applySales(db.get(), related, { plus });
 
   let canReview = false;
   if (req.user) {

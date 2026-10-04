@@ -41,6 +41,7 @@ router.post('/register', authLimiter, (req, res) => {
   const info = db.get().prepare('INSERT INTO users (name, email, phone, password_hash, created_at) VALUES (?,?,?,?,?)')
     .run(name, email, phone || null, hashPassword(req.body.password), Date.now());
   const user = db.get().prepare('SELECT * FROM users WHERE id = ?').get(Number(info.lastInsertRowid));
+  if (req.body.referralCode) require('../growth').linkReferral(db.get(), user.id, req.body.referralCode);
   const csrfToken = createSession(res, req, user.id);
   req.user = user;
   audit(req, 'user.register');

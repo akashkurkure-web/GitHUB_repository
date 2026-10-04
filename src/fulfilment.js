@@ -135,6 +135,8 @@ function move(d, orderId, next, { actor = 'admin', note = '', refundToWallet = f
     set.delivered_at = now;
     if (o.payment_method === 'cod' && o.payment_status === 'pending') set.payment_status = 'paid';
     text = 'Delivered. We hope you love it.';
+    // A friend's first delivered order rewards both people (referrals, blueprint stage 12).
+    require('./growth').rewardReferral(d, o, now);
   }
   if (next === 'cancelled' || next === 'rto' || next === 'returned') {
     const reason = next === 'cancelled' ? `Refund for cancelled order ${o.order_no}` : next === 'rto' ? `Refund for undelivered order ${o.order_no}` : `Refund for returned order ${o.order_no}`;
