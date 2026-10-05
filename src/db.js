@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
-  "action" TEXT NOT NULL, -- quoted: libSQL servers upper-case unquoted keyword names (ACTION)
+  action TEXT NOT NULL,
   detail TEXT,
   ip TEXT,
   created_at INTEGER NOT NULL
@@ -177,9 +177,24 @@ function open(file = config.dbFile) {
 }
 
 /** Brings databases created by older versions up to the current schema. */
-/** Makes a libsql connection look exactly like node:sqlite: rows without libsql's extra `_metadata` field. */
+/**
+ * Makes a libsql connection behave like node:sqlite for this app. A libSQL server re-spells SQL keywords used
+ * as names in upper case (a column called action comes back as ACTION, an alias "AS plan" as PLAN), and adds
+ * a _metadata field to every row. So column definitions are quoted when tables are created, all-caps keys are
+ * turned back to lower case (the app never uses all-caps names), and _metadata is dropped.
+ */
 function libsqlAdapter(raw) {
-  const clean = (row) => { if (row && typeof row === 'object') delete row._metadata; return row; };
+  const clean = (row) => {
+    if (!row || typeof row !== 'object') return row;
+    delete row._metadata;
+    for (const k of Object.keys(row)) {
+      if (k.length > 1 && /^[A-Z_]+$/.test(k) && !(k.toLowerCase() in row)) { row[k.toLowerCase()] = row[k]; delete row[k]; }
+    }
+    return row;
+  };
+  const quoteColumns = (sql) => sql
+    .replace(/^(\s*)([a-z_][a-z0-9_]*)(\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\b)/gim, '$1"$2"$3')
+    .replace(/(ADD\s+COLUMN\s+)([a-z_][a-z0-9_]*)\b/gi, '$1"$2"');
   return {
     prepare(sql) {
       const st = raw.prepare(sql);
@@ -190,16 +205,16 @@ function libsqlAdapter(raw) {
         run: (...args) => { const r = st.run(...args); return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }; },
       };
     },
-    exec: (sql) => raw.exec(sql),
+    exec: (sql) => raw.exec(/\b(CREATE\s+TABLE|ADD\s+COLUMN)\b/i.test(sql) ? quoteColumns(sql) : sql),
     close: () => raw.close(),
   };
 }
 
-/** A libSQL server rewrites unquoted keyword column names in upper case; the app reads lower-case names. */
+/** Safety net: every column must come out lower-case, as the app spells them. */
 function checkColumnNames(d) {
   for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
     const bad = d.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name).filter((c) => c !== c.toLowerCase());
-    if (bad.length) throw new Error(`Column names ${bad.join(', ')} in table ${name} must be quoted in the schema (libSQL upper-cases keywords).`);
+    if (bad.length) throw new Error(`Columns ${bad.join(', ')} in table ${name} were created in upper case by the database server.`);
   }
 }
 
