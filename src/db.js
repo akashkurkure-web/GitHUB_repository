@@ -349,11 +349,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `;
 
+/**
+ * Opens the store database. With TURSO_DATABASE_URL set (Vercel's Turso integration adds it), the data lives
+ * in a hosted libSQL database so it survives restarts and is shared by every server instance; otherwise it is
+ * a local SQLite file. Both drivers expose the same synchronous prepare/get/all/run/exec API.
+ */
 function open(file = config.dbFile) {
   if (db) return db;
-  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
-  db = new DatabaseSync(file);
-  db.exec(SCHEMA);
+  if (config.databaseUrl && file !== ':memory:') {
+    const Database = require('libsql');
+    db = libsqlAdapter(new Database(config.databaseUrl, { authToken: config.databaseToken }));
+    db.exec(SCHEMA.replace('PRAGMA journal_mode = WAL;', '')); // WAL is a local-file setting
+    checkColumnNames(db);
+  } else {
+    if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
+    db = new DatabaseSync(file);
+    db.exec(SCHEMA);
+  }
   migrate(db);
   return db;
 }
@@ -392,6 +404,47 @@ const ADDED_COLUMNS = [
 ];
 
 /** Brings databases created by older versions up to the current schema. */
+/**
+ * Makes a libsql connection behave like node:sqlite for this app. A libSQL server re-spells SQL keywords used
+ * as names in upper case (a column called action comes back as ACTION, an alias "AS plan" as PLAN), and adds
+ * a _metadata field to every row. So column definitions are quoted when tables are created, all-caps keys are
+ * turned back to lower case (the app never uses all-caps names), and _metadata is dropped.
+ */
+function libsqlAdapter(raw) {
+  const clean = (row) => {
+    if (!row || typeof row !== 'object') return row;
+    delete row._metadata;
+    for (const k of Object.keys(row)) {
+      if (k.length > 1 && /^[A-Z_]+$/.test(k) && !(k.toLowerCase() in row)) { row[k.toLowerCase()] = row[k]; delete row[k]; }
+    }
+    return row;
+  };
+  const quoteColumns = (sql) => sql
+    .replace(/^(\s*)([a-z_][a-z0-9_]*)(\s+(?:TEXT|INTEGER|REAL|BLOB|NUMERIC)\b)/gim, '$1"$2"$3')
+    .replace(/(ADD\s+COLUMN\s+)([a-z_][a-z0-9_]*)\b/gi, '$1"$2"');
+  return {
+    prepare(sql) {
+      const st = raw.prepare(sql);
+      return {
+        get: (...args) => clean(st.get(...args)),
+        all: (...args) => st.all(...args).map(clean),
+        iterate: function* (...args) { for (const row of st.iterate(...args)) yield clean(row); },
+        run: (...args) => { const r = st.run(...args); return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }; },
+      };
+    },
+    exec: (sql) => raw.exec(/\b(CREATE\s+TABLE|ADD\s+COLUMN)\b/i.test(sql) ? quoteColumns(sql) : sql),
+    close: () => raw.close(),
+  };
+}
+
+/** Safety net: every column must come out lower-case, as the app spells them. */
+function checkColumnNames(d) {
+  for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
+    const bad = d.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name).filter((c) => c !== c.toLowerCase());
+    if (bad.length) throw new Error(`Columns ${bad.join(', ')} in table ${name} were created in upper case by the database server.`);
+  }
+}
+
 function migrate(d) {
 
   // Orders gained new statuses (confirmed, out for delivery, failed delivery, RTO), wallet, EMI and delivery speed.

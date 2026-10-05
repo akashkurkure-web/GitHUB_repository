@@ -1003,8 +1003,9 @@ async function viewWishlist() {
 }
 
 // ---------- Auth ----------
-function viewLogin(params) {
+async function viewLogin(params) {
   if (state.user) { location.hash = '#/'; return; }
+  try { if ((await api('GET', '/auth/setup')).needed) return viewSetup(); } catch { /* fall through to normal sign in */ }
   const qp = new URLSearchParams(params);
   const next = qp.get('next');
   const safeNext = next && next.startsWith('#/') ? next : '#/';
@@ -1065,6 +1066,32 @@ function viewLogin(params) {
       h('p', { class: 'muted small' }, 'By continuing you agree to Bazaario\'s ', h('a', { href: '#/page/terms' }, 'terms'), ' and ', h('a', { href: '#/page/privacy' }, 'privacy notice'), '.'),
       h('div', { class: 'divider' }, h('span', null, 'New to Bazaario?')),
       h('a', { class: 'btn btn-outline btn-block', href: '#/register' + (next ? '?next=' + encodeURIComponent(next) : '') }, 'Create an account'))));
+}
+
+// First visit after install: the store has no owner yet, so Sign in becomes "set up your store".
+function viewSetup() {
+  const name = h('input', { required: true, maxLength: 60, autocomplete: 'name', placeholder: 'First and last name' });
+  const email = h('input', { type: 'email', required: true, autocomplete: 'email', maxLength: 254 });
+  const pw = h('input', { type: 'password', required: true, minLength: 8, maxLength: 128, autocomplete: 'new-password', placeholder: 'At least 8 characters' });
+  const pw2 = h('input', { type: 'password', required: true, autocomplete: 'new-password' });
+  const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
+  const btn = h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' } }, 'Create owner account');
+  mount(h('div', { class: 'auth' },
+    h('div', { class: 'auth-side' }, h('h2', null, 'Welcome to your new store'),
+      h('p', null, 'Create the owner account to run Bazaario Studio: products, photos, prices, stock and orders. You only do this once.')),
+    h('div', { class: 'card' }, h('h1', null, 'Set up your store'), err,
+      h('form', { onsubmit: async (e) => {
+        e.preventDefault(); err.classList.add('hidden');
+        if (pw.value !== pw2.value) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
+        btn.disabled = true;
+        try {
+          await afterLogin(await api('POST', '/auth/setup', { name: name.value, email: email.value, password: pw.value }), '#/admin');
+          toast('Your store is ready. Welcome to Bazaario Studio!');
+        } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); btn.disabled = false; }
+      } },
+      h('label', null, 'Your name'), name, h('label', null, 'Email'), email,
+      h('label', null, 'Password'), pw, h('div', { class: 'muted small' }, 'At least 8 characters, with letters and numbers.'),
+      h('label', null, 'Re-enter password'), pw2, btn))));
 }
 
 function viewRegister(params) {

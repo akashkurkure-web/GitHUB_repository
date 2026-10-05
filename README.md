@@ -33,13 +33,19 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 1. Sign up at <https://render.com> using **Sign in with GitHub**.
 2. Click **New + → Blueprint**, pick this repository, and Render reads `render.yaml`.
    *Or use the button:* [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/akashkurkure-web/GitHUB_repository)
-3. When asked, enter **ADMIN_EMAIL** and **ADMIN_PASSWORD** (choose a strong one) → **Apply**.
+3. Click **Apply**. No settings to fill in.
 4. After about 3-5 minutes your store is live at `https://bazaario-xxxx.onrender.com`.
    *To use your own domain:* Settings → Custom Domains.
 5. Limits of the free plan:
    - It sleeps after 15 minutes idle, so the first visit takes about 50 seconds.
    - **Its disk is wiped on every restart or redeploy**, so orders and accounts reset to demo data.
    - *Workaround for permanent data:* upgrade to the Starter plan, add a **Disk** mounted at `/var/data`, and set the env var `DB_FILE=/var/data/bazaario.db`.
+
+### Option C: Vercel with a free Turso database (data kept for good)
+1. Sign in at <https://vercel.com> with GitHub → **Add New → Project** → import this repository → **Deploy**.
+2. In the project open **Storage → Create Database → Turso** (free) and connect it to the project, ticking **Production** and **Preview**. Vercel adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for you.
+3. **Deployments → ⋯ → Redeploy**. Open the site, click **Sign in** and create your owner account.
+   *Without step 2* the store still runs, but Vercel wipes its data on restart, so treat it as a preview.
 
 *Other hosts that work the same way:* Railway, Fly.io, Azure App Service, AWS Elastic Beanstalk. Use the Docker image from Section 4.
 
@@ -130,18 +136,16 @@ npm install
 ```
 *Workaround behind a corporate proxy:* `npm config set proxy http://proxy:port` and `npm config set https-proxy http://proxy:port`.
 
-**Step 4: Choose your admin login and start**
+**Step 4: Start**
 ```bash
-# macOS / Linux
-ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start
-# Windows PowerShell
-$env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm start
+npm start
 ```
-*If you skip the variables,* a random admin password is printed **once** in the console on first start. Copy it.
+**First visit: create your owner account.** Open the store and click **Sign in**. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you land in Bazaario Studio. This happens only once; after that **Sign in** is the normal login. Do this right after deploying, before you share the link.
+*Optional:* to create the owner from the command line instead, start with `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start`.
 
 **Step 5: Open the store**
 - Shop: <http://localhost:3000>
-- Bazaario Studio (admin): sign in with the admin account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
+- Bazaario Studio (admin): sign in with your owner account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
 
 **Step 6: Try a test purchase**
 1. Register a customer account (top right → *Start here*).
@@ -151,7 +155,7 @@ $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm st
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
 
 **Reset demo data:** stop the server, then `npm run seed` (or delete the `data/` folder).
-**Run automated tests:** `npm test` (13 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders and admin).
+**Run automated tests:** `npm test` (17 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders and admin).
 
 ---
 
@@ -160,7 +164,6 @@ $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm st
 ```bash
 docker build -t bazaario .
 docker run -d --name bazaario -p 3000:3000 \
-  -e ADMIN_EMAIL=you@example.com -e ADMIN_PASSWORD='YourStr0ngPass' \
   -v bazaario-data:/app/data --restart unless-stopped bazaario
 ```
 The named volume `bazaario-data` keeps the database across upgrades.

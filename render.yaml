@@ -12,7 +12,3 @@ services:
         value: production
       - key: NODE_VERSION
         value: 22.12.0
-      - key: ADMIN_EMAIL
-        sync: false   # Render asks you for this when you create the service
-      - key: ADMIN_PASSWORD
-        sync: false
