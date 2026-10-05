@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --omit=dev",
+  "buildCommand": "mkdir -p .vercel-static && printf 'User-agent: *\\nAllow: /\\n' > .vercel-static/robots.txt",
+  "outputDirectory": ".vercel-static",
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "{public/**,node_modules/@fontsource/inter/**}",
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
+}
