@@ -1,5 +1,4 @@
 'use strict';
-const crypto = require('node:crypto');
 const db = require('./db');
 const config = require('./config');
 const { hashPassword } = require('./security');
@@ -228,8 +227,10 @@ function seed({ reset = false, log = console.log } = {}) {
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
   if (already > 0) {
     // Older stores were seeded before pictures existed: fill in only products that still have none.
-    const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
-    PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    if (d.prepare("SELECT 1 FROM products WHERE image = '' LIMIT 1").get()) {
+      const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
+      PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    }
     // Stores from before Express riders and partner shops get them now.
     db.tx((t) => seedExpress(t, Date.now()));
     db.tx((t) => seedGrowth(t, Date.now()));
@@ -238,6 +239,8 @@ function seed({ reset = false, log = console.log } = {}) {
 
   const now = Date.now();
   db.tx(() => {
+    // Re-check inside the transaction: two servers starting together must not both seed a shared database.
+    if (d.prepare('SELECT COUNT(*) AS n FROM products').get().n > 0) return;
     const insCat = d.prepare('INSERT INTO categories (slug, name, icon) VALUES (?,?,?)');
     for (const c of CATEGORIES) insCat.run(...c);
     const catId = Object.fromEntries(d.prepare('SELECT slug, id FROM categories').all().map((r) => [r.slug, r.id]));
@@ -260,14 +263,12 @@ function seed({ reset = false, log = console.log } = {}) {
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);
 
-    let adminPassword = config.adminPassword;
-    if (!adminPassword) {
-      adminPassword = crypto.randomBytes(9).toString('base64url') + '9a';
-      log(`\n[seed] Admin account created: ${config.adminEmail}  password: ${adminPassword}\n` +
-          '[seed] Set ADMIN_EMAIL / ADMIN_PASSWORD env vars to choose your own. This password is shown only once.\n');
+    // With ADMIN_PASSWORD set, the owner account is created up front. Without it, the store opens with
+    // no owner and the first visit to Sign in asks the owner to create their account (POST /api/auth/setup).
+    if (config.adminPassword) {
+      d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
+        .run('Store Admin', config.adminEmail, hashPassword(config.adminPassword), 'admin', now);
     }
-    d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
-      .run('Store Admin', config.adminEmail, hashPassword(adminPassword), 'admin', now);
   });
 }
 
