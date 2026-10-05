@@ -19,6 +19,8 @@ let base;
 before(async () => {
   db.open(':memory:');
   seed({ log: () => {} });
+  // These tests check list prices, so the demo sales are switched off (sales are tested in growth.test.js).
+  db.get().exec('UPDATE sales SET active = 0');
   // Tests run at any hour: keep the demo partner shop open all day.
   db.get().prepare("UPDATE sellers SET open_hour = 0, close_hour = 24 WHERE lane = 'shop'").run();
   server = createApp().listen(0);

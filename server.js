@@ -73,6 +73,8 @@ function createApp() {
     expressCities: Object.values(require('./src/delivery').EXPRESS_CITIES),
     express: { shopAcceptMins: config.express.shopAcceptMs / 60000, prepMins: config.express.prepMins },
     reseller: { maxMarginPct: config.reseller.maxMarginPct },
+    plus: { plans: config.plus.plans, expressFee: config.plus.expressFee, earlyHours: config.plus.earlyHours },
+    referral: { referrerReward: config.referral.referrerReward, friendReward: config.referral.friendReward },
     testMode: { payments: config.paymentProvider === 'test', courier: config.courierProvider === 'test', sms: config.smsProvider === 'test' },
     otpSignIn: config.otpEnabled,
     grievanceOfficer: config.grievanceOfficer,
@@ -81,12 +83,17 @@ function createApp() {
   api.use('/auth', require('./src/routes/auth'));
   // Shared product links open without signing in, so this comes before the routers that require it.
   api.use('/share', require('./src/routes/reseller').share);
+  // Plus, sales, referrals, ad clicks and preferences. Routes that need sign-in check it themselves.
+  const growthRoutes = require('./src/routes/growth');
+  api.use('/', growthRoutes.open);
+  api.use('/', growthRoutes.mine);
   api.use('/', require('./src/routes/catalog'));
   api.use('/', require('./src/routes/support'));
   api.use('/', require('./src/routes/orders').router);
   api.use('/seller', require('./src/routes/seller'));
   api.use('/shop', require('./src/routes/shop'));
   api.use('/reseller', require('./src/routes/reseller').router);
+  api.use('/admin', growthRoutes.admin);
   api.use('/admin', require('./src/routes/admin-market'));
   api.use('/admin', require('./src/routes/admin'));
   api.use('/', require('./src/routes/shopping'));
@@ -131,6 +138,10 @@ if (require.main === module) {
       require('./src/hyperlocal').tick(db);
     } catch (err) { console.error(err); }
   }, 15_000).unref();
+  // Win-back messages (bag left behind, price drop, back in stock), checked every hour.
+  setInterval(() => {
+    try { db.tx((d) => require('./src/winback').run(d)); } catch (err) { console.error(err); }
+  }, 3600_000).unref();
   app.listen(config.port, () => console.log(`${config.storeName} running at http://localhost:${config.port}`));
 }
 

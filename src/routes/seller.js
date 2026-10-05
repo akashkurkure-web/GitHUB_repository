@@ -526,4 +526,59 @@ router.get('/payouts', requireSeller, (req, res) => {
   res.json({ upcoming: settlement.upcoming(d, req.seller.id), payouts, returnWindowDays: config.returnWindowDays });
 });
 
+// ---------- Sponsored listings (blueprint stage 12) ----------
+// A seller pays per click for a "Sponsored" slot in search. Spend is taken from the next payout.
+router.get('/ads', requireSeller, (req, res) => {
+  const d = db.get();
+  const growth = require('../growth');
+  const campaigns = d.prepare(`SELECT a.*, p.title, p.emoji, p.color, p.image,
+      (SELECT COUNT(*) FROM ad_clicks c WHERE c.campaign_id = a.id) AS clicks,
+      (SELECT COALESCE(SUM(cost), 0) FROM ad_clicks c WHERE c.campaign_id = a.id) AS spend
+      FROM ad_campaigns a JOIN products p ON p.id = a.product_id WHERE a.seller_id = ? ORDER BY a.status, a.updated_at DESC`).all(req.seller.id)
+    .map((a) => ({ ...a, today: growth.spentToday(d, a.id) }));
+  const products = d.prepare(`SELECT p.id, p.title FROM offers o JOIN products p ON p.id = o.product_id
+      WHERE o.seller_id = ? AND o.active = 1 AND p.active = 1 ORDER BY p.title`).all(req.seller.id);
+  res.json({ campaigns, products, unbilled: growth.unbilledAdSpend(d, req.seller.id), rules: config.ads });
+});
+
+const readAd = (b, partial = false) => {
+  const A = config.ads;
+  const out = {};
+  if (!partial || b.bid !== undefined) out.bid = v.int(b.bid, 'Cost per click (₹)', { min: A.minBid / 100, max: A.maxBid / 100 }) * 100;
+  if (!partial || b.dailyBudget !== undefined) out.daily_budget = v.int(b.dailyBudget, 'Daily budget (₹)', { min: A.minDailyBudget / 100, max: 100000 }) * 100;
+  if (out.bid && out.daily_budget && out.daily_budget < out.bid) throw new HttpError(400, 'The daily budget must cover at least one click.');
+  return out;
+};
+
+router.post('/ads', requireSeller, (req, res) => {
+  const productId = v.int(req.body.productId, 'Product', { min: 1 });
+  const ad = readAd(req.body);
+  const d = db.get();
+  // Partner shops sell only to buyers nearby, so they are not shown in national search.
+  if (req.seller.lane === 'shop') throw new HttpError(400, 'Sponsored listings are for sellers who ship across India.');
+  if (!d.prepare('SELECT 1 FROM offers WHERE seller_id = ? AND product_id = ? AND active = 1').get(req.seller.id, productId)) {
+    throw new HttpError(400, 'You can only promote products you sell.');
+  }
+  const now = Date.now();
+  d.prepare(`INSERT INTO ad_campaigns (seller_id, product_id, bid, daily_budget, status, created_at, updated_at) VALUES (?,?,?,?,'active',?,?)
+    ON CONFLICT(seller_id, product_id) DO UPDATE SET bid = excluded.bid, daily_budget = excluded.daily_budget, status = 'active', updated_at = excluded.updated_at`)
+    .run(req.seller.id, productId, ad.bid, ad.daily_budget, now, now);
+  audit(req, 'seller.ad', { productId, bid: ad.bid });
+  res.status(201).json({ ok: true });
+});
+
+router.patch('/ads/:id', requireSeller, (req, res) => {
+  const id = v.int(req.params.id, 'Campaign', { min: 1 });
+  const d = db.get();
+  const a = d.prepare('SELECT * FROM ad_campaigns WHERE id = ? AND seller_id = ?').get(id, req.seller.id);
+  if (!a) throw new HttpError(404, 'Campaign not found.');
+  const ad = readAd(req.body, true);
+  const next = { bid: ad.bid ?? a.bid, daily_budget: ad.daily_budget ?? a.daily_budget,
+    status: req.body.status === undefined ? a.status : req.body.status === 'paused' ? 'paused' : 'active' };
+  if (next.daily_budget < next.bid) throw new HttpError(400, 'The daily budget must cover at least one click.');
+  d.prepare('UPDATE ad_campaigns SET bid = ?, daily_budget = ?, status = ?, updated_at = ? WHERE id = ?').run(next.bid, next.daily_budget, next.status, Date.now(), id);
+  audit(req, 'seller.ad_update', { campaignId: id, status: next.status });
+  res.json({ ok: true });
+});
+
 module.exports = router;

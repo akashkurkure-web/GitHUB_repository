@@ -94,7 +94,10 @@ router.post('/orders', (req, res) => {
     const byId = new Map(q.lines.map((l) => [l.product_id, l]));
     const packs = q.packages.map((p) => ({ ...p, lines: p.lines.map((id) => byId.get(id)) }));
     const subs = packs.map((p) => p.lines.reduce((s, l) => s + l.price * l.qty, 0));
-    const discounts = allocate(q.discount, subs);
+    // Sale discounts belong to the package they were on; the coupon is shared in proportion.
+    const saleOffs = packs.map((p) => p.lines.reduce((s, l) => s + l.sale_off * l.qty, 0));
+    const coupons = allocate(q.couponDiscount, subs.map((sub, i) => sub - saleOffs[i]));
+    const discounts = coupons.map((c, i) => c + saleOffs[i]);
     const fees = q.shipping + q.expressFee + q.codFee;
     const totals = subs.map((sub, i) => sub - discounts[i] + (i === 0 ? fees : 0));
     const wallets = allocate(q.walletApplied, totals);
@@ -112,6 +115,9 @@ router.post('/orders', (req, res) => {
       const orderId = Number(insOrder.run(no, req.user.id, subs[i], discounts[i], i === 0 ? fees : 0, totals[i], wallets[i], q.coupon,
         method, pay.status, pay.ref, pay.emiMonths || null, p.speed, p.promisedAt || q.promisedAt, snapshot, i === 0 ? idem : null,
         p.sellerId, checkoutRef, now, now).lastInsertRowid);
+      // What Plus saved on this checkout (free delivery, lower Express fee) is kept on its first order.
+      const plusSaved = q.plus && i === 0 ? q.plus.shippingSaved + q.plus.expressSaved : 0;
+      d.prepare('UPDATE orders SET sale_discount = ?, plus = ?, plus_saved = ? WHERE id = ?').run(saleOffs[i], q.plus ? 1 : 0, plusSaved, orderId);
       for (const l of p.lines) {
         insItem.run(orderId, l.product_id, l.offer_id, l.title, l.emoji, l.price, l.qty, l.hsn, l.gst_rate, l.share_id, l.reseller_margin);
         // Conditional decrement guards against overselling under concurrency.

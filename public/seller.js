@@ -190,7 +190,7 @@ function applyForm(me, prev, { shop = false } = {}) {
 
 // ---------------- Seller Hub ----------------
 const HUB_TABS = [['overview', 'Overview'], ['orders', 'Orders'], ['listings', 'Listings'], ['add', 'Add a product'], ['returns', 'Returns and claims'],
-  ['payouts', 'Payouts'], ['account', 'Account']];
+  ['payouts', 'Payouts'], ['ads', 'Ads'], ['account', 'Account']];
 
 async function viewSellerHub(params) {
   if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent('#/seller'); return; }
@@ -210,12 +210,13 @@ async function viewSellerHub(params) {
   }
   const c = me.counts;
   const badge = { orders: c.toAccept + c.toPack + c.toShip, returns: c.returns };
-  const tabs = h('div', { class: 'tabs' }, HUB_TABS.map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/seller?tab=${k}`; } },
+  // Partner shops sell only nearby, so sponsored listings in national search are not for them.
+  const tabs = h('div', { class: 'tabs' }, HUB_TABS.filter(([k]) => k !== 'ads' || s.lane !== 'shop').map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/seller?tab=${k}`; } },
     l, badge[k] ? h('span', { class: 'tab-count' }, badge[k]) : null)));
   const body = h('div');
   const test = state.config.testMode || {};
   mount(head, test.courier || test.payments ? h('p', { class: 'alert alert-test' }, 'Test mode: courier bookings, tracking numbers, bank checks and payouts are simulated. Nothing is sent or paid.') : null, tabs, body);
-  await ({ overview: hubOverview, orders: hubOrders, listings: hubListings, add: hubAdd, returns: hubReturns, payouts: hubPayouts, account: hubAccount })[tab](body, me, qp);
+  await ({ overview: hubOverview, orders: hubOrders, listings: hubListings, add: hubAdd, returns: hubReturns, payouts: hubPayouts, ads: hubAds, account: hubAccount })[tab](body, me, qp);
 }
 
 function hubOverview(body, me) {
@@ -550,16 +551,18 @@ async function hubPayouts(body, me) {
       h('div', { class: 'stat' }, h('span', { class: 'hint' }, 'Paid so far'), h('b', null, inr(payouts.reduce((s, p) => s + p.net, 0))))),
     h('p', { class: 'hint' }, `Money for an order is released ${returnWindowDays} days after delivery, when the return window closes. From the item price we deduct commission, the fee per order, ${pl.gstOnFeesPct}% GST on those two, GST TCS of ${pl.tcsPct}% and income-tax TDS of ${pl.tdsPct}%. TCS and TDS are deposited against your GSTIN and PAN, and you can claim them back.`),
     h('div', { class: 'card' }, h('h3', null, 'Coming up'),
-      upcoming.lines.length || upcoming.claims.length ? h('div', { class: 'table-wrap' }, h('table', null,
+      upcoming.lines.length || upcoming.claims.length || upcoming.adSpend ? h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['Order', 'Delivered', 'Released on', 'Item price', 'Commission and fees', 'TCS and TDS', 'You get'].map((t) => h('th', null, t))),
         upcoming.lines.map((l) => h('tr', null, h('td', null, l.orderNo), h('td', null, fmtDate(l.deliveredAt)),
           h('td', null, l.onHold ? h('span', { class: 'low' }, 'On hold: return requested') : l.ready ? h('span', { class: 'ok' }, 'In the next payout') : fmtDate(l.releaseAt)),
           h('td', null, inr(l.gross)), h('td', null, '-' + inr(deductions(l))), h('td', null, '-' + inr(taxes(l))), h('td', null, h('b', null, inr(l.net))))),
-        upcoming.claims.map((c) => h('tr', null, h('td', null, c.order_no), h('td', { colSpan: 5 }, `Approved claim: ${c.reason}`), h('td', null, h('b', null, inr(c.amount)))))))
+        upcoming.claims.map((c) => h('tr', null, h('td', null, c.order_no), h('td', { colSpan: 5 }, `Approved claim: ${c.reason}`), h('td', null, h('b', null, inr(c.amount))))),
+        upcoming.adSpend ? h('tr', null, h('td', null, '—'), h('td', { colSpan: 5 }, h('a', { href: '#/seller?tab=ads' }, 'Sponsored listing clicks')), h('td', null, h('b', null, '-' + inr(upcoming.adSpend)))) : null))
         : h('p', { class: 'muted' }, 'Nothing yet. Delivered orders appear here.')),
     h('div', { class: 'card', style: { marginTop: '16px' } }, h('h3', null, 'Payouts'),
       payouts.length ? payouts.map((p) => h('details', { class: 'payout' },
         h('summary', null, h('b', null, inr(p.net)), h('span', null, `${fmtDate(p.created_at)} · ${p.payout_no}`), h('span', { class: 'hint' }, `UTR ${p.utr || 'pending'}`)),
+        p.ad_spend ? h('p', { class: 'hint' }, `Sponsored listing clicks taken from this payout: ${inr(p.ad_spend)}`) : null,
         h('div', { class: 'table-wrap' }, h('table', null,
           h('tr', null, ['Order', 'Item price', 'Commission', 'Fee', 'GST on fees', 'TCS', 'TDS', 'Claim', 'Net'].map((t) => h('th', null, t))),
           p.lines.map((l) => h('tr', null, h('td', null, l.order_no || '—'), h('td', null, inr(l.gross)), h('td', null, inr(l.commission)), h('td', null, inr(l.fees)),

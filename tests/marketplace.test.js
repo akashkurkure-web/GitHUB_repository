@@ -18,6 +18,8 @@ let base;
 before(async () => {
   db.open(':memory:');
   seed({ log: () => {} });
+  // These tests check list prices, so the demo sales are switched off (sales are tested in growth.test.js).
+  db.get().exec('UPDATE sales SET active = 0');
   server = createApp().listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api`;

@@ -67,7 +67,8 @@ function priceBlock(p, big) {
   return h('div', { class: 'pricing' + (big ? ' pricing-lg' : '') },
     h('span', { class: 'now' }, inr(p.price)),
     p.mrp > p.price ? [h('span', { class: 'was', 'aria-label': `MRP ${inr(p.mrp)}` }, inr(p.mrp)),
-      h('span', { class: 'save' }, `Save ${inr(p.mrp - p.price)} · ${pct(p)}%`)] : null);
+      h('span', { class: 'save' }, `Save ${inr(p.mrp - p.price)} · ${pct(p)}%`)] : null,
+    saleLine(p, big));
 }
 
 function ratingChip(p) {
@@ -159,6 +160,7 @@ async function afterLogin(data, redirect) {
   state.user = data.user;
   state.csrf = data.csrfToken;
   await loadWishlistIds();
+  await loadPlus();
   const guest = guestCart();
   if (guest.length) {
     try { await api('POST', '/cart/merge', { items: guest }); } catch { /* ignore */ }
@@ -170,7 +172,7 @@ async function afterLogin(data, redirect) {
 
 async function logout() {
   await api('POST', '/auth/logout').catch(() => {});
-  state.user = null; state.csrf = null; state.wish = new Set();
+  state.user = null; state.csrf = null; state.wish = new Set(); state.plus = null;
   renderHeader();
   toast('You have been signed out.');
   location.hash = '#/';
@@ -266,13 +268,14 @@ function productCard(p, { compact } = {}) {
     h('div', { class: 'pimg-wrap' },
       h('a', { href: url, 'aria-label': p.title, tabIndex: -1 },
         pic(p, 'pimg')),
-      p.is_deal ? h('span', { class: 'tag-steal' }, 'Deal') : null,
+      p.sale ? saleTag(p) : p.is_deal ? h('span', { class: 'tag-steal' }, 'Deal') : null,
       paintWishButton(h('button', { class: 'heart', type: 'button', 'data-wish': p.id, onclick: (e) => toggleWishlist(p, e.currentTarget) }))),
     h('div', { class: 'pbody' },
       p.brand ? h('div', { class: 'brand' }, p.brand) : null,
       h('a', { class: 'title', href: url }, p.title),
       ratingChip(p),
       priceBlock(p),
+      p.upcoming ? h('div', { class: 'sale-line' }, `${p.upcoming.pct}% off when the sale opens`) : null,
       p.assured ? h('span', { class: 'assured-tag' }, 'Bazaario Assured') : null,
       h('div', { class: 'ship' }, p.express ? 'Express delivery available' : `Free delivery by ${deliveryDate(false).split(',')[0]}`),
       p.stock === 0 ? h('div', { class: 'err' }, 'Out of stock') : p.stock < 10 ? h('div', { class: 'low' }, `Only ${p.stock} left`) : null,
@@ -281,11 +284,13 @@ function productCard(p, { compact } = {}) {
 
 // ---------------- Views ----------------
 async function viewHome() {
-  const [deals, best, all] = await Promise.all([
+  const [deals, best, all, sales] = await Promise.all([
     api('GET', '/products?deals=1&limit=8&sort=discount'),
     api('GET', '/products?sort=rating&limit=8'),
     api('GET', '/products?limit=48'),
+    api('GET', '/sales').catch(() => ({ sales: [] })),
   ]);
+  const liveSale = sales.sales.find((x) => x.live || x.earlyNow);
   const collage = deals.items.slice(0, 4);
   const recentIds = store.get('recent', []);
   const recent = all.items.filter((p) => recentIds.includes(p.id)).sort((a, b) => recentIds.indexOf(a.id) - recentIds.indexOf(b.id));
@@ -297,22 +302,23 @@ async function viewHome() {
   mount(
     h('section', { class: 'hero' },
       h('div', { class: 'hero-copy' },
-        h('span', { class: 'eyebrow' }, 'Festive sale'),
+        h('span', { class: 'eyebrow' }, liveSale ? liveSale.name : 'Everyday prices'),
         h('h1', null, 'Everything your home needs, delivered.'),
         h('p', null, 'Handpicked brands, honest prices and doorstep delivery across India. New here? Take 10% off with ', h('b', null, 'WELCOME10'), '.'),
         h('div', { class: 'hero-cta' },
-          h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Shop deals'),
+          h('a', { class: 'btn btn-primary', href: liveSale ? `#/sale/${liveSale.slug}` : '#/s?deals=1' }, liveSale ? 'Shop the sale' : 'Shop deals'),
           h('a', { class: 'btn btn-outline', href: '#/s?sort=newest' }, 'New arrivals'))),
       h('div', { class: 'hero-collage', 'aria-hidden': 'true' }, collage.map((p, i) =>
         h('a', { class: `collage-tile t${i}${p.image ? ' has-photo' : ''}`, href: `#/p/${p.id}`, tabIndex: -1, style: { background: p.color } },
           p.image ? h('img', { src: p.image, alt: '', loading: 'lazy' }) : h('span', { class: 'collage-emoji' }, p.emoji), h('span', { class: 'collage-price' }, inr(p.price)))))),
+    saleBand(sales.sales),
     h('section', { class: 'section' },
       h('div', { class: 'section-head' }, h('div', null, h('h2', null, 'Shop by category'), h('p', { class: 'tagline' }, 'Browse all departments'))),
-      h('div', { class: 'cat-row' }, state.categories.map((c) => h('a', { class: 'cat', href: `#/s?category=${c.slug}` }, c.name)))),
+      h('div', { class: 'cat-row' }, state.categories.map((c) => h('a', { class: 'cat', href: `#/c/${c.slug}` }, c.name)))),
     section('Deals of the day', 'Limited-time offers', '#/s?deals=1', deals.items),
     h('section', { class: 'promo' },
-      h('div', null, h('h3', null, 'Free delivery, every day'), h('p', null, 'On orders above ₹499, with 10-day easy returns and Cash on Delivery.')),
-      h('div', { class: 'promo-badges' }, h('span', null, 'Secure payments'), h('span', null, 'Easy returns'), h('span', null, 'Genuine brands'))),
+      h('div', null, h('h3', null, 'Free delivery, every day'), h('p', null, 'On orders above ₹499, or on every order with Bazaario Plus. 10-day easy returns and Cash on Delivery.')),
+      h('div', { class: 'promo-badges' }, h('a', { href: '#/plus' }, 'Bazaario Plus'), h('a', { href: '#/refer' }, 'Refer and earn ₹100'), h('span', null, 'Genuine brands'))),
     section('Most loved', 'Highest rated products', '#/s?sort=rating', best.items),
     recent.length ? section('Recently viewed', 'Based on your browsing', null, recent.slice(0, 8)) : null,
     state.user ? null : h('section', { class: 'signin-band' },
@@ -382,7 +388,8 @@ async function viewSearch(params) {
       h('div', { class: 'results-bar' },
         h('div', null, h('h1', { class: 'results-title' }, heading), h('span', { class: 'muted' }, data.total ? `Showing ${start}–${Math.min(start + data.pageSize - 1, data.total)} of ${data.total} products` : 'No products found')),
         h('label', { class: 'inline' }, 'Sort by: ', sortSel)),
-      data.items.length ? h('div', { class: 'grid' }, data.items.map((p) => productCard(p)))
+      data.items.length ? h('div', { class: 'grid' }, (data.sponsored || []).map(sponsoredCard),
+        data.items.filter((p) => !(data.sponsored || []).some((a) => a.id === p.id)).map((p) => productCard(p)))
         : h('div', { class: 'card empty' }, h('h2', null, 'No products found'), h('p', null, 'Try a different spelling or remove some filters.'), h('a', { class: 'btn btn-primary', href: '#/s?deals=1' }, 'Browse deals')),
       pager)));
 }
@@ -419,7 +426,8 @@ async function viewProduct(id) {
   };
   if (pin) setTimeout(checkPin);
 
-  const coupons = [['WELCOME10', '10% off up to ₹200 on orders above ₹499'], ['SAVE100', '₹100 off on orders above ₹999'], ['FESTIVE15', '15% off up to ₹1,500 above ₹2,999']];
+  const coupons = [['FIRST150', '₹150 off your first order above ₹999'], ['WELCOME10', '10% off up to ₹200 on orders above ₹499'], ['SAVE100', '₹100 off on orders above ₹999'],
+    ['FESTIVE15', '15% off up to ₹1,500 above ₹2,999'], ['PLUS200', 'Plus members: ₹200 off above ₹1,499']];
 
   const total = data.ratingDistribution.reduce((s, r) => s + r.n, 0);
   const distRows = [5, 4, 3, 2, 1].map((star) => {
@@ -473,7 +481,7 @@ async function viewProduct(id) {
 
   mount(
     h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, 'Home'), ' / ',
-      h('a', { href: `#/s?category=${p.category}` }, p.category_name), ' / ', h('span', null, p.brand)),
+      h('a', { href: `#/c/${p.category}` }, p.category_name), ' / ', h('span', null, p.brand)),
     h('div', { class: 'pdp' },
       h('div', { class: 'pdp-gallery' },
         pic(p, 'pdp-img', { role: 'img', 'aria-label': p.title }),
@@ -489,7 +497,7 @@ async function viewProduct(id) {
           h('a', { href: '#reviews', onclick: (e) => { e.preventDefault(); $('#reviews').scrollIntoView(); } }, 'Read reviews'),
           h('span', { class: 'muted' }, `${p.sold_count.toLocaleString('en-IN')}+ bought this month`)),
         h('div', { class: 'buy-card' },
-          p.is_deal ? h('span', { class: 'tag-steal inline-tag' }, 'Deal') : null,
+          p.sale ? h('span', { class: 'tag-steal tag-sale inline-tag' }, `${p.sale.name} · ${p.sale.pct}% off`) : p.is_deal ? h('span', { class: 'tag-steal inline-tag' }, 'Deal') : null,
           priceBlock(p, true),
           h('p', { class: 'muted small' }, `Inclusive of GST · or ${inr(Math.ceil(p.price / 12))}/month with no-cost EMI`),
           h('div', { class: 'stock-line' },
@@ -497,6 +505,8 @@ async function viewProduct(id) {
             h('span', { class: 'muted' }, p.express ? `Express delivery in ${(state.config.expressCities || []).length} cities` : `Free delivery by ${deliveryDate(false)}`)),
           h('div', { class: 'pin-check' }, pinIn, h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: checkPin }, 'Check')),
           pinOut,
+          state.plus ? h('p', { class: 'plus-note' }, 'Plus: free delivery, and Express for ', inr((state.config.plus || {}).expressFee || 0), '.')
+            : h('p', { class: 'plus-note' }, h('a', { href: '#/plus' }, 'Bazaario Plus'), ': free delivery on every order and sales a day early.'),
           nearBox,
           p.stock > 0 ? h('div', { class: 'buy-actions' },
             h('label', { class: 'qty' }, h('span', { class: 'sr-only' }, 'Quantity'), qtySel),
@@ -595,16 +605,19 @@ async function viewCart() {
             h('option', { value: i + 1, selected: i + 1 === l.qty }, `Qty ${i + 1}`))),
         h('button', { class: 'link-btn', onclick: () => saveLater(l, !saved) }, saved ? 'Move to bag' : 'Save for later'),
         h('button', { class: 'link-btn danger', onclick: () => remove(l) }, 'Remove'))),
-    h('div', { class: 'line-price' }, priceBlock(l)));
+    h('div', { class: 'line-price' }, priceBlock({ ...l, price: l.price - (l.sale_off || 0), sale: l.sale ? { ...l.sale, was: null } : l.sale })));
 
-  const remaining = data.freeShippingThreshold - data.subtotal;
+  const itemsTotal = data.subtotal - (data.saleDiscount || 0);
+  const remaining = data.plus ? 0 : data.freeShippingThreshold - itemsTotal;
   const summary = h('div', { class: 'card' },
     data.lines.length ? (remaining > 0
       ? h('div', { class: 'ship-meter' }, h('p', { class: 'small' }, `You're ${inr(remaining)} away from free delivery`),
-        h('div', { class: 'progress' }, h('i', { style: { width: `${Math.min(100, (data.subtotal / data.freeShippingThreshold) * 100)}%` } })))
-      : h('div', { class: 'ship-meter done' }, h('p', { class: 'small' }, 'Your order qualifies for free delivery'))) : null,
+        h('div', { class: 'progress' }, h('i', { style: { width: `${Math.min(100, (itemsTotal / data.freeShippingThreshold) * 100)}%` } })),
+        h('p', { class: 'hint' }, 'Or ', h('a', { href: '#/plus' }, 'get free delivery on every order with Plus'), '.'))
+      : h('div', { class: 'ship-meter done' }, h('p', { class: 'small' }, data.plus ? 'Free delivery with Bazaario Plus' : 'Your order qualifies for free delivery'))) : null,
     h('h3', null, 'Bag summary'),
-    h('div', { class: 'sum-row' }, h('span', null, `Items (${data.count})`), h('b', null, inr(data.subtotal))),
+    h('div', { class: 'sum-row' }, h('span', null, `Items (${data.count})`), h('b', null, inr(itemsTotal))),
+    data.saleDiscount ? h('p', { class: 'savings' }, `Sale prices save you ${inr(data.saleDiscount)}`) : null,
     h('button', {
       class: 'btn btn-primary btn-block', disabled: !data.lines.length,
       onclick: () => { location.hash = state.user ? '#/checkout' : '#/login?next=%23%2Fcheckout'; },
@@ -765,13 +778,16 @@ async function viewCheckout() {
         h('hr'), h('h3', null, 'Order summary'),
         h('dl', null,
           h('dt', null, 'Items:'), h('dd', null, inr(q.subtotal)),
-          h('dt', null, 'Delivery:'), h('dd', null, q.shipping ? inr(q.shipping) : 'Free'),
-          q.expressFee ? [h('dt', null, 'Express delivery:'), h('dd', null, inr(q.expressFee))] : null,
-          q.discount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.discount))] : null,
+          q.saleDiscount ? [h('dt', null, 'Sale savings:'), h('dd', { class: 'ok' }, '-' + inr(q.saleDiscount))] : null,
+          h('dt', null, 'Delivery:'), h('dd', null, q.shipping ? inr(q.shipping) : q.plus && q.plus.shippingSaved ? 'Free with Plus' : 'Free'),
+          q.expressFee ? [h('dt', null, q.plus ? 'Express delivery (Plus):' : 'Express delivery:'), h('dd', null, inr(q.expressFee))] : null,
+          q.couponDiscount ? [h('dt', null, `Coupon (${q.coupon}):`), h('dd', { class: 'ok' }, '-' + inr(q.couponDiscount))] : null,
           q.walletApplied ? [h('dt', null, 'Order total:'), h('dd', null, inr(q.total)), h('dt', null, 'From wallet:'), h('dd', { class: 'ok' }, '-' + inr(q.walletApplied))] : null,
           h('dt', { class: 'total' }, 'To pay'), h('dd', { class: 'total' }, inr(q.payable))),
         q.promisedAt && q.packages.length === 1 ? h('p', { class: 'ok small' }, `Arrives ${promiseText({ speed: q.packages[0].speed || q.speed, promisedAt: q.packages[0].promisedAt || q.promisedAt })}`) : null,
-        q.savings > 0 ? h('p', { class: 'savings' }, `You save ${inr(q.savings)} on this order`) : null);
+        q.savings > 0 ? h('p', { class: 'savings' }, `You save ${inr(q.savings)} on this order`) : null,
+        !q.plus && (q.shipping || q.expressFee) ? h('p', { class: 'hint' }, h('a', { href: '#/plus' }, 'Bazaario Plus'),
+          ` makes delivery free${q.expressFee ? ` and Express ${inr((state.config.plus || {}).expressFee || 0)}` : ''}.`) : null);
       return true;
     } catch (e) {
       if (sel.coupon) { sel.coupon = ''; couponIn.value = ''; fail(e); return refreshQuote(); }
@@ -793,7 +809,8 @@ async function viewCheckout() {
           pk.speed === 'express' ? h('span', { class: 'speed-tag' }, 'Express') : null,
           pk.promisedAt ? h('span', { class: 'ok' }, `Arrives ${promiseText({ speed: pk.speed || q.speed, promisedAt: pk.promisedAt })}`) : null) : null,
         pk.lines.map((id) => byId.get(id)).map((l) => h('div', { class: 'order-item' }, pic(l, 'pimg'),
-          h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price)), h('div', { class: 'muted small' }, `Qty ${l.qty}`),
+          h('div', null, h('b', null, l.title), h('div', { class: 'now-sm' }, inr(l.price - (l.sale_off || 0)), l.sale ? h('span', { class: 'sale-line' }, ` ${l.sale.name} price`) : null),
+            h('div', { class: 'muted small' }, `Qty ${l.qty}`),
             l.express ? h('div', { class: 'hint' }, 'Express item') : null, l.blocked ? h('div', { class: 'err small' }, l.blocked) : null))))));
   };
 
@@ -835,7 +852,7 @@ async function viewCheckout() {
             sel.coupon = couponIn.value.trim();
             if (await refreshQuote() && sel.coupon) toast(`Coupon ${sel.coupon.toUpperCase()} applied.`);
           } }, 'Apply')),
-          h('p', { class: 'hint' }, 'Try WELCOME10, SAVE100 or FESTIVE15')),
+          h('p', { class: 'hint' }, 'Try FIRST150 on your first order, or WELCOME10, SAVE100 and FESTIVE15')),
         h('div', { class: 'step' }, h('h2', null, h('span', { class: 'n' }, '4'), 'Your items'), itemsBox)),
       summaryBox));
   await refreshQuote();
@@ -976,7 +993,9 @@ async function viewOrder(id, params) {
           h('dl', null,
             h('dt', null, 'Item(s) Subtotal:'), h('dd', null, inr(o.subtotal)),
             h('dt', null, 'Delivery:'), h('dd', null, o.shipping ? inr(o.shipping) : 'Free'),
-            o.discount ? [h('dt', null, `Promotion (${o.coupon_code}):`), h('dd', null, '-' + inr(o.discount))] : null,
+            o.sale_discount ? [h('dt', null, 'Sale savings:'), h('dd', null, '-' + inr(o.sale_discount))] : null,
+            o.discount - (o.sale_discount || 0) ? [h('dt', null, `Promotion (${o.coupon_code}):`), h('dd', null, '-' + inr(o.discount - (o.sale_discount || 0)))] : null,
+            o.plus_saved ? [h('dt', null, 'Saved with Plus:'), h('dd', null, inr(o.plus_saved))] : null,
             o.wallet_used ? [h('dt', null, 'Paid from wallet:'), h('dd', null, inr(o.wallet_used))] : null,
             h('dt', { class: 'total' }, 'Order total'), h('dd', { class: 'total' }, inr(o.total))),
           h('p', { class: 'hint' }, `Payment: ${PAY_LABEL[o.payment_method] || o.payment_method}${o.emi_months ? ` (${o.emi_months} months)` : ''} · ${o.payment_status}${o.payment_ref ? ' · Ref ' + o.payment_ref : ''}`)))),
@@ -1117,6 +1136,8 @@ function viewSetup() {
 function viewRegister(params) {
   if (state.user) { location.hash = '#/'; return; }
   const next = new URLSearchParams(params).get('next');
+  const ref = (new URLSearchParams(params).get('ref') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  const refIn = h('input', { value: ref, maxLength: 8, placeholder: 'Optional', autocomplete: 'off' });
   const name = h('input', { required: true, maxLength: 60, autocomplete: 'name', placeholder: 'First and last name' });
   const phone = h('input', { maxLength: 10, inputMode: 'numeric', pattern: '[6-9][0-9]{9}', autocomplete: 'tel-national', placeholder: 'Optional', title: '10-digit Indian mobile number' });
   const email = h('input', { type: 'email', required: true, autocomplete: 'email', maxLength: 254 });
@@ -1125,20 +1146,22 @@ function viewRegister(params) {
   const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
   mount(h('div', { class: 'auth' },
     h('div', { class: 'auth-side' }, h('h2', null, 'Create your account'),
-      h('p', null, 'Get 10% off your first order with WELCOME10, plus wishlists and order tracking.')),
+      ref ? h('p', null, `A friend invited you. Once your first order is delivered, you both get ${inr((state.config.referral || {}).friendReward || 0)} in your Bazaario wallets.`)
+        : h('p', null, 'Get ₹150 off your first order with FIRST150, plus wishlists and order tracking.')),
     h('div', { class: 'card' }, h('h1', null, 'Create account'), err,
       h('form', { onsubmit: async (e) => {
         e.preventDefault(); err.classList.add('hidden');
         if (pw.value !== pw2.value) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
         try {
-          await afterLogin(await api('POST', '/auth/register', { name: name.value, phone: phone.value, email: email.value, password: pw.value }),
+          await afterLogin(await api('POST', '/auth/register', { name: name.value, phone: phone.value, email: email.value, password: pw.value, referralCode: refIn.value.trim() || undefined }),
             next && next.startsWith('#/') ? next : '#/');
-          toast('Welcome to Bazaario! Use code WELCOME10 on your first order.');
+          toast('Welcome to Bazaario! Use code FIRST150 on your first order.');
         } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
       } },
       h('label', null, 'Your name'), name, h('label', null, 'Mobile number'), phone, h('label', null, 'Email'), email,
       h('label', null, 'Password'), pw, h('div', { class: 'muted small' }, 'At least 8 characters, with letters and numbers.'),
       h('label', null, 'Re-enter password'), pw2,
+      h('label', null, 'Invite code'), refIn,
       h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' } }, 'Create account')),
       h('p', { class: 'muted small' }, 'Already have an account? ', h('a', { href: '#/login' }, 'Sign in')))));
 }
@@ -1154,7 +1177,9 @@ async function viewAccount() {
       tile('#/security', 'Profile & security', 'Name, mobile number and password'),
       tile('#/addresses', 'Addresses', 'Manage delivery addresses'),
       tile('#/wishlist', 'Wishlist', 'Things you have saved'),
-      tile('#/wallet', 'Wallet', 'Refunds and balance'),
+      tile('#/wallet', 'Wallet', 'Refunds, rewards and balance'),
+      tile('#/plus', 'Bazaario Plus', state.plus ? `Member until ${fmtDate(state.plus.endsAt)}` : 'Free delivery on every order'),
+      tile('#/refer', 'Refer and earn', 'You and a friend get ₹100 each'),
       tile('#/help', 'Help centre', 'Questions and your requests'),
       tile('#/s?deals=1', 'Deals', 'Limited-time offers'),
       tile('#/seller', 'Seller Hub', 'Sell on Bazaario: listings, orders and payouts'),
@@ -1188,7 +1213,8 @@ async function viewSecurity() {
         h('ul', { class: 'hint' }, h('li', null, 'Passwords are hashed with scrypt and never stored in plain text.'),
           h('li', null, 'Accounts lock for 15 minutes after 5 failed sign-in attempts.'),
           h('li', null, 'Changing your password signs out every other device.'),
-          h('li', null, 'Card numbers are never stored — only the last 4 digits.')))));
+          h('li', null, 'Card numbers are never stored — only the last 4 digits.')),
+        await marketingCard())));
 }
 
 async function viewAddresses() {
@@ -1217,6 +1243,7 @@ async function viewAdmin(params) {
   const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['returns', 'Returns'], ['helpdesk', 'Help desk'], ['messages', 'Messages'],
     ['products', 'Products'], ['sellers', 'Sellers'], ['qc', 'Catalog check'], ['claims', 'Claims'], ['settlement', 'Settlement'],
     ['express', 'Express'], ['riders', 'Riders'], ['resellers', 'Resellers'],
+    ['sales', 'Sales'], ['reports', 'Reports'], ['plus', 'Plus'], ['ads', 'Ads'],
     ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
     .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
@@ -1391,6 +1418,7 @@ async function viewAdmin(params) {
   if (['sellers', 'qc', 'claims', 'settlement'].includes(tab)) await studioMarket(tab, body, qp);
   if (['express', 'riders'].includes(tab)) await studioExpress(tab, body);
   if (tab === 'resellers') await studioResellers(body);
+  if (['sales', 'reports', 'plus', 'ads'].includes(tab)) await studioGrowth(tab, body);
 
   if (tab === 'customers') {
     const { users } = await api('GET', '/admin/users');
@@ -1408,19 +1436,34 @@ async function viewAdmin(params) {
     const maxD = h('input', { type: 'number', min: 1, placeholder: 'Optional' });
     const minO = h('input', { type: 'number', min: 0, value: 0 });
     const desc = h('input', { maxLength: 200 });
+    const cStart = h('input', { type: 'date' });
+    const cEnd = h('input', { type: 'date' });
+    const perUser = h('input', { type: 'number', min: 1, placeholder: 'No limit' });
+    const maxUses = h('input', { type: 'number', min: 1, placeholder: 'No limit' });
+    const firstOnly = h('input', { type: 'checkbox' });
+    const plusOnly = h('input', { type: 'checkbox' });
+    const day = (val, end) => (val ? new Date(`${val}T00:00:00+05:30`).getTime() + (end ? 86400000 : 0) : undefined);
+    const rules = (c) => [c.starts_at || c.ends_at ? `${c.starts_at ? fmtDate(c.starts_at) : 'Now'} to ${c.ends_at ? fmtDate(c.ends_at - 1) : 'no end'}` : null,
+      c.per_user_limit ? `${c.per_user_limit} per buyer` : null, c.max_uses ? `${c.max_uses} in total` : null,
+      c.first_order_only ? 'First order' : null, c.plus_only ? 'Plus only' : null].filter(Boolean).join(' · ') || '—';
     add(body, h('div', { class: 'card', style: { marginBottom: '16px' } }, h('h3', null, 'Create / update coupon'),
       h('form', { onsubmit: async (e) => {
         e.preventDefault();
-        try { await api('POST', '/admin/coupons', { code: code.value, kind: kind.value, value: Number(value.value), maxDiscount: maxD.value ? Number(maxD.value) : undefined, minOrder: Number(minO.value), description: desc.value }); toast('Coupon saved.'); route(); } catch (ex) { fail(ex); }
+        try { await api('POST', '/admin/coupons', { code: code.value, kind: kind.value, value: Number(value.value), maxDiscount: maxD.value ? Number(maxD.value) : undefined, minOrder: Number(minO.value), description: desc.value,
+          startsAt: day(cStart.value), endsAt: day(cEnd.value, true), perUserLimit: perUser.value ? Number(perUser.value) : undefined, maxUses: maxUses.value ? Number(maxUses.value) : undefined,
+          firstOrderOnly: firstOnly.checked, plusOnly: plusOnly.checked }); toast('Coupon saved.'); route(); } catch (ex) { fail(ex); }
       } }, h('div', { class: 'form-grid' },
         h('div', null, h('label', null, 'Code'), code), h('div', null, h('label', null, 'Type'), kind),
         h('div', null, h('label', null, 'Value (% or ₹)'), value), h('div', null, h('label', null, 'Max discount (₹)'), maxD),
-        h('div', null, h('label', null, 'Min order (₹)'), minO), h('div', null, h('label', null, 'Description'), desc)),
+        h('div', null, h('label', null, 'Min order (₹)'), minO), h('div', null, h('label', null, 'Description'), desc),
+        h('div', null, h('label', null, 'Starts on'), cStart), h('div', null, h('label', null, 'Last day'), cEnd),
+        h('div', null, h('label', null, 'Uses per buyer'), perUser), h('div', null, h('label', null, 'Total uses'), maxUses)),
+      h('div', { class: 'chip-set' }, h('label', { class: 'inline' }, firstOnly, 'First order only'), h('label', { class: 'inline' }, plusOnly, 'Plus members only')),
       h('button', { class: 'btn btn-primary', style: { marginTop: '10px' } }, 'Save coupon'))),
-    h('table', null, h('tr', null, ['Code', 'Type', 'Value', 'Max', 'Min order', 'Status', ''].map((t) => h('th', null, t))),
+    h('div', { class: 'table-wrap' }, h('table', null, h('tr', null, ['Code', 'Type', 'Value', 'Max', 'Min order', 'Rules', 'Status', ''].map((t) => h('th', null, t))),
       coupons.map((c) => h('tr', null, h('td', null, h('b', null, c.code)), h('td', null, c.kind), h('td', null, c.kind === 'percent' ? `${c.value}%` : inr(c.value)),
-        h('td', null, c.max_discount ? inr(c.max_discount) : '—'), h('td', null, inr(c.min_order)), h('td', null, c.active ? 'Active' : 'Disabled'),
-        h('td', null, c.active ? h('button', { class: 'btn btn-sm btn-outline', onclick: async () => { await api('DELETE', `/admin/coupons/${encodeURIComponent(c.code)}`).catch(fail); route(); } }, 'Disable') : null)))));
+        h('td', null, c.max_discount ? inr(c.max_discount) : '—'), h('td', null, inr(c.min_order)), h('td', { class: 'hint' }, rules(c)), h('td', null, c.active ? 'Active' : 'Disabled'),
+        h('td', null, c.active ? h('button', { class: 'btn btn-sm btn-outline', onclick: async () => { await api('DELETE', `/admin/coupons/${encodeURIComponent(c.code)}`).catch(fail); route(); } }, 'Disable') : null))))));
   }
 
   if (tab === 'audit') {
@@ -1699,6 +1742,10 @@ async function route() {
     shop: () => viewShop(query),
     resell: () => viewResell(query),
     r: () => viewShare(parts[1]),
+    plus: () => viewPlus(),
+    sale: () => viewSale(parts[1]),
+    refer: () => viewRefer(),
+    c: () => viewHub(parts[1]),
   };
   const view = routes[parts[0] || ''];
   if (!view) { viewPage('missing'); return; }
@@ -1766,7 +1813,8 @@ async function init() {
     state.categories = cats.categories;
   } catch { /* render anyway */ }
   const sub = $('#subnav');
-  state.categories.forEach((c) => sub.append(h('a', { class: 'chip', href: `#/s?category=${c.slug}` }, c.name)));
+  state.categories.forEach((c) => sub.append(h('a', { class: 'chip', href: `#/c/${c.slug}` }, c.name)));
+  await loadPlus();
   $('#newsletter').addEventListener('submit', (e) => {
     e.preventDefault();
     e.target.reset();

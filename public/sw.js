@@ -2,8 +2,8 @@
 // Service worker: makes Bazaario installable as an app (Android, Windows, macOS) and keeps the
 // storefront shell available on a flaky connection. API responses are never cached: prices,
 // stock, carts and orders always come live from the server.
-const VERSION = 'bazaario-v4';
-const SHELL = ['/', '/styles.css', '/app.js', '/seller.js', '/express.js', '/reseller.js', '/favicon.svg', '/manifest.webmanifest', '/offline.html',
+const VERSION = 'bazaario-v5';
+const SHELL = ['/', '/styles.css', '/app.js', '/seller.js', '/express.js', '/reseller.js', '/growth.js', '/i18n.js', '/favicon.svg', '/manifest.webmanifest', '/offline.html',
   '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

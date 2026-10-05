@@ -3,6 +3,11 @@
 @font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('/fonts/inter/files/inter-latin-500-normal.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-weight: 600; font-display: swap; src: url('/fonts/inter/files/inter-latin-600-normal.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-weight: 700; font-display: swap; src: url('/fonts/inter/files/inter-latin-700-normal.woff2') format('woff2'); }
+/* Hindi: Noto Sans Devanagari, used only for Devanagari letters (Inter has none). */
+@font-face { font-family: 'Noto Sans Devanagari'; font-weight: 400 500; font-display: swap; unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+25CC, U+A830-A839, U+A8E0-A8FF;
+  src: url('/fonts/noto-sans-devanagari/files/noto-sans-devanagari-devanagari-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Noto Sans Devanagari'; font-weight: 600 700; font-display: swap; unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+25CC, U+A830-A839, U+A8E0-A8FF;
+  src: url('/fonts/noto-sans-devanagari/files/noto-sans-devanagari-devanagari-600-normal.woff2') format('woff2'); }
 
 :root {
   --paper: #F6F5F2;
@@ -26,7 +31,7 @@
   --r-btn: 4px;
   --r-card: 6px;
   --r-img: 4px;
-  --font: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font: 'Inter', 'Noto Sans Devanagari', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -146,7 +151,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 12px 20px 32px; min-height: 6
 .promo h3 { color: #fff; margin-bottom: 2px; font-size: 15px; }
 .promo p { margin: 0; opacity: .85; font-size: 13px; }
 .promo-badges { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; font-weight: 500; }
-.promo-badges span + span { border-left: 1px solid rgba(255, 255, 255, .3); padding-left: 16px; }
+.promo-badges > * + * { border-left: 1px solid rgba(255, 255, 255, .3); padding-left: 16px; }
+.promo-badges a { color: #fff; }
 .signin-band { margin-top: 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 14px 20px; }
 .signin-band h3 { margin-bottom: 2px; }
 .signin-band p { margin: 0; color: var(--ink-soft); font-size: 13px; }
@@ -528,6 +534,73 @@ details.payout[open] summary { margin-bottom: 8px; }
 .resell-margin label { margin: 0; font-size: 12px; }
 .resell-margin input { width: 90px; min-height: 30px; padding: 4px 8px; }
 
+
+/* ---------------- Growth and loyalty: sales, Plus, referrals, sponsored, hubs ---------------- */
+.lang-btn { border: 1px solid var(--line-strong); background: var(--surface); cursor: pointer; font: inherit; font-size: 13px; }
+html[lang^="hi"] body { line-height: 1.6; }
+.tag-sale { background: var(--leaf); }
+.sale-line { color: var(--leaf); font-size: 12px; font-weight: 600; margin-top: 2px; }
+.pricing .sale-line { flex-basis: 100%; margin-top: 0; }
+.sale-line a { color: var(--leaf); }
+.sale-line .hint { font-weight: 400; color: var(--ink-soft); margin-top: 2px; }
+.countdown { font-variant-numeric: tabular-nums; }
+.sale-band { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--saffron-tint); border: 1px solid #F0DDB0; border-radius: var(--r-card); padding: 16px 20px; }
+.sale-band.live { background: #E5F2EA; border-color: #BFDDCB; }
+.sale-band h2 { font-size: 20px; margin: 0 0 2px; }
+.sale-band p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.sale-band .sale-when { color: var(--ink); font-weight: 600; margin-top: 6px; }
+.sale-band-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.sale-big { font-size: 22px; color: var(--leaf); letter-spacing: -.01em; }
+.sale-hero { background: var(--saffron-tint); border: 1px solid #F0DDB0; border-radius: var(--r-card); padding: 20px 24px; margin-bottom: 12px; }
+.sale-hero.live { background: #E5F2EA; border-color: #BFDDCB; }
+.sale-hero h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.02em; }
+.sale-hero p { margin: 4px 0; color: var(--ink-soft); }
+.sale-hero .sale-when { color: var(--ink); font-weight: 600; }
+.sale-chips { margin-bottom: 12px; }
+.sale-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.sale-tile p { margin: 4px 0 0; }
+.plus-note { font-size: 12px; color: var(--ink-soft); margin: 8px 0 0; }
+.plus-badge { display: inline-block; background: var(--teal); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; margin-bottom: 8px; }
+.plus-hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: center; background: var(--teal-tint); border: 1px solid #C9DEDC; border-radius: var(--r-card); padding: 24px 28px; margin-bottom: 16px; }
+.plus-hero h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 8px; }
+.plus-hero p { color: var(--ink-soft); margin: 0; }
+.plus-benefits { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.plus-benefits li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 10px 14px; display: flex; flex-direction: column; }
+.plus-benefits li span { color: var(--ink-soft); font-size: 13px; }
+.plus-card.member { border-color: var(--teal); }
+.plus-card h2 { font-size: 18px; margin: 0 0 6px; }
+.plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.plan-opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line-strong); border-radius: var(--r-card); padding: 12px 14px; cursor: pointer; background: var(--surface); }
+.plan-opt.sel { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal); }
+.plan-opt input { width: 15px; min-height: 15px; height: 15px; margin-top: 3px; accent-color: var(--teal); }
+.plan-opt > span { display: flex; flex-direction: column; gap: 2px; }
+.plan-price { font-size: 22px; font-weight: 700; }
+.plan-price small { font-size: 13px; font-weight: 400; color: var(--ink-soft); }
+.plan-opt .save { color: var(--leaf); font-size: 12px; font-weight: 600; }
+.refer-card h2 { font-size: 20px; margin: 0 0 4px; }
+.refer-code { display: flex; flex-direction: column; align-items: flex-start; background: var(--saffron-tint); border: 1px dashed #E2C27B; border-radius: var(--r-card); padding: 10px 14px; margin: 12px 0; }
+.refer-code b { font-size: 24px; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.copy-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.steps-list { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 6px; }
+.pcard-ad { border-color: var(--line-strong); }
+.ad-label { display: inline-block; align-self: flex-start; width: max-content; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 5px; margin-bottom: 4px; }
+.hub-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 20px 24px; }
+.hub-hero h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.02em; }
+.hub-hero p { margin: 0 0 8px; color: var(--ink-soft); max-width: 620px; }
+.guide { margin-top: 16px; }
+.guide h2 { font-size: 18px; }
+.guide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.guide-point { border-left: 3px solid var(--teal); padding: 2px 0 2px 12px; }
+.guide-point h3 { font-size: 14px; margin: 0 0 2px; }
+.guide-point p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.guide-tip { margin: 14px 0 0; background: var(--teal-tint); border-radius: var(--r-btn); padding: 8px 12px; font-size: 13px; }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+.report-grid table { width: 100%; }
+.bar-row.cat-bar { grid-template-columns: 140px 1fr 90px; }
+.sale-pick-add { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; }
+.sale-pick-list { margin-top: 8px; display: grid; gap: 4px; }
+.sale-pick { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+
 @media print {
   body { background: #fff; }
   .strip, .topbar, .chips, .footer, .no-print, .toast { display: none !important; }
@@ -538,7 +611,7 @@ details.payout[open] summary { margin-bottom: 8px; }
 
 @media (max-width: 1080px) {
   .shop-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pdp, .reviews, .two-col, .search-layout, .hero, .help-cols { grid-template-columns: 1fr; }
+  .pdp, .reviews, .two-col, .search-layout, .hero, .help-cols, .plus-hero { grid-template-columns: 1fr; }
   .pdp-gallery, .filters, .two-col > .card:last-child { position: static; max-height: none; }
   .filters-fold > summary { display: block; cursor: pointer; padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: var(--r-btn); background: var(--surface); font-weight: 600; width: max-content; }
   .filters-fold[open] > summary { margin-bottom: 8px; }
@@ -582,4 +655,12 @@ details.payout[open] summary { margin-bottom: 8px; }
   .stepper li:not(:last-child)::after { margin: 0 4px; }
   .footer-cols { grid-template-columns: 1fr 1fr; }
   .section-head .tagline { display: none; }
+  .plus-hero, .plan-grid, .report-grid { grid-template-columns: 1fr; }
+  .plus-hero, .sale-hero, .hub-hero { padding: 16px; }
+  .plus-hero h1, .sale-hero h1, .hub-hero h1 { font-size: 22px; }
+  .sale-band-side { align-items: flex-start; }
+  .bar-row.cat-bar { grid-template-columns: 100px 1fr 80px; }
+  .sale-pick-add { grid-template-columns: 1fr 70px; }
+  .sale-pick-add .btn { grid-column: 1 / -1; }
+  .lang-btn { font-size: 12px; }
 }
