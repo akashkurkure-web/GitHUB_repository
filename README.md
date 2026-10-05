@@ -92,7 +92,12 @@ bump `VERSION` in `public/sw.js` so installed apps pick up the change immediatel
 | **Returns and wallet** | Return with a reason inside 10 days, doorstep pickup, refund to the wallet (instant) or the original payment method, COD refunds to the wallet, wallet balance usable at checkout |
 | **Help centre** | Questions by topic, support requests with a 24-hour reply target, Grievance Officer complaints acknowledged at once and due in 30 days, policy pages (terms, privacy, returns, shipping, cancellation, grievance) |
 | **Account** | Profile, change password (signs out other devices), sign in with a mobile OTP, addresses, wish list, wallet, my requests |
-| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, failed deliveries, returns, late requests, low stock), order fulfilment workflow, returns queue, help desk inbox, outgoing messages, product CRUD with photo upload, customers, coupons, security audit log |
+| **Marketplace** | One page per product with many sellers; the best offer (price, dispatch speed, seller score) wins the buy box and the rest show under "Other sellers"; **Bazaario Assured** badge and filter for Direct and top sellers; seller details on every product (name, address, GSTIN, score) as the E-Commerce Rules require; only brands and Bazaario sell mobiles, electronics and beauty |
+| **Seller sign-up** | Three ways to sell: Brand, Standard (GSTIN) and Value (GST enrolment ID, 0% commission, sells within its own state); GSTIN checksum, PAN and IFSC checks, ₹1 bank check, choice of Bazaario Fulfilled, Bazaario Pickup or Self Ship; Studio approves, rejects or suspends |
+| **Seller Hub** | Overview with performance score (cancellations, late dispatch, seller-fault returns), add an offer to an existing product or create a new page (automatic checks, duplicate detection, quality check by a person), listings with inline price and stock, CSV bulk upload and download, orders to accept, pack and hand over, printable shipping label with barcode and GST invoice, returns and claims, payouts with every deduction shown |
+| **Order routing** | One checkout, one payment, one order per seller; risk holds (big COD from new accounts, earlier refused COD, bulk quantities) checked in Studio; sellers accept within 24 hours, otherwise the order moves to the next seller at the same or lower price, or is cancelled and refunded |
+| **Payouts** | Paid after the 10-day return window: commission by category, fulfilment fee, 18% GST on fees, GST TCS 0.5% (section 52) and TDS 0.1% (section 194-O); claims added to the next payout; tax invoice (CGST and SGST, or IGST) or bill of supply per seller; daily money check in Studio |
+| **Bazaario Studio (admin)** | Dashboard (revenue, open orders, failed deliveries, returns, late requests, low stock), order fulfilment workflow, returns queue, help desk inbox, outgoing messages, product CRUD with photo upload, customers, coupons, sellers, catalog check, claims, settlement, security audit log |
 
 ## 2. Security controls
 
@@ -197,7 +202,12 @@ The named volume `bazaario-data` keeps the database across upgrades.
    - create the order on the gateway server-side and open its hosted checkout/SDK in the browser (card data never touches your server);
    - mark the order `paid` **only** after verifying the gateway's webhook signature server-side;
    - add the gateway domains to the CSP in `server.js` (`script-src`, `frame-src`, `connect-src`).
-7. **Compliance checklist (India):** GSTIN on invoices; Consumer Protection (E-Commerce) Rules 2020 (seller details, grievance officer,
+7. **Marketplace sellers (before you onboard real sellers).**
+   - Set `COMPANY_GSTIN` and `COMPANY_STATE` (Bazaario Direct's own GSTIN and state; they print on Direct invoices and decide CGST/SGST versus IGST).
+   - Have your CA confirm commission, GST on fees, TCS and TDS rates in `src/config.js` (`market` block), and file GSTR-8 (TCS) and TDS returns every month from the Studio settlement report.
+   - Connect a KYC and payouts partner: GSTIN and PAN verification (for example Signzy, Karza or the GSTN API), a real ₹1 penny drop and payouts (RazorpayX or Cashfree Payouts). Today `src/kyc.js` checks formats and checksums and `src/settlement.js` records a test UTR.
+   - Publish seller terms (`#/page/terms`) covering commission, payout timing, claims and suspension.
+8. **Compliance checklist (India):** GSTIN on invoices; Consumer Protection (E-Commerce) Rules 2020 (seller details, grievance officer,
    return/refund policy, country of origin); DPDP Act 2023 privacy notice & consent; RBI rules on card storage (this app already never stores card numbers).
 
 ### Scaling beyond one server
@@ -234,10 +244,19 @@ src/routes/shopping.js Cart, save-for-later, guest-cart merge, wishlist, address
 src/routes/orders.js   Checkout quote, place/cancel orders, missed-delivery rescheduling, returns, wallet
 src/routes/support.js  Help desk tickets for buyers and the Studio inbox
 src/routes/admin.js    Bazaario Studio (admin) APIs
-public/                Storefront SPA (index.html, app.js, styles.css)
+src/market.js          Sellers and offers: best offer ranking, Assured badge, seller score, commission
+src/routing.js         Order routing: risk holds, seller acceptance, rerouting and expiry
+src/settlement.js      Seller payouts: commission, fees, GST on fees, TCS, TDS, claims, daily money check
+src/invoice.js         GST tax invoice or bill of supply, and the shipping label
+src/kyc.js             GSTIN checksum, PAN, IFSC and test bank check
+src/listing.js         Listing details, automatic quality checks, duplicate detection
+src/routes/seller.js   Seller Hub APIs (sign-up, listings, orders, returns, claims, payouts)
+src/routes/admin-market.js  Studio APIs for sellers, catalog check, claims and settlement
+public/                Storefront SPA (index.html, app.js, seller.js for Seller Hub, styles.css)
 DESIGN.md              Design rules (colours, type, layout, vocabulary, checklist)
 tests/api.test.js      Integration & security tests (npm test)
 tests/buying-flow.test.js  Delivery promise, Express, EMI, failed delivery, returns, wallet, help desk, OTP, upgrade
+tests/marketplace.test.js  Seller KYC, offers, quality check, checkout split, routing, payouts, claims, score
 ```
 
 ## 7. Common customisations

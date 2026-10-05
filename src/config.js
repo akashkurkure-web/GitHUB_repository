@@ -63,6 +63,39 @@ module.exports = {
   },
   // Legal entity shown on policy pages and invoices.
   companyName: env.COMPANY_NAME || 'Bazaario Retail (company details to be added)',
+  // Bazaario Direct (our own stock) sells under the company's GSTIN, from its warehouse state.
+  companyGstin: env.COMPANY_GSTIN || '',
+  companyState: env.COMPANY_STATE || 'Maharashtra',
+
+  // ---------- Marketplace (blueprint stages 1, 2, 6, 7 and 10) ----------
+  // Starting placeholders from the blueprint. Have a CA confirm the tax rates before go-live.
+  market: {
+    // Commission on the item price, by category, for brands and Standard sellers. Value sellers pay 0%.
+    commission: {
+      mobiles: 5, electronics: 8, fashion: 15, 'home-kitchen': 12, books: 8, beauty: 12, sports: 10, toys: 10, grocery: 5, appliances: 6,
+    },
+    defaultCommission: 10,
+    // Flat fee per order (paise) by fulfilment option: Bazaario Fulfilled stores and ships, Pickup collects from the seller.
+    fulfilmentFee: { fulfilled: 6000, pickup: 4000, self: 0 },
+    gstOnFeesPct: 18,
+    // GST TCS (CGST Act section 52) and income-tax TDS (section 194-O), deducted from seller payouts.
+    tcsPct: 0.5,
+    tdsPct: 0.1,
+    // A seller must accept a new order within this many hours, or it moves to the next seller.
+    acceptHours: 24,
+    // Value sellers ship by economy courier: this many extra days on the delivery promise.
+    valueExtraDays: 2,
+    // Only brands and Bazaario Direct may sell in these categories (authenticity rule).
+    authenticCategories: ['mobiles', 'electronics', 'beauty'],
+    // New listings in these categories always go to a person for quality check.
+    riskyCategories: ['beauty', 'grocery'],
+    // Food and cosmetics must show a best-before date.
+    bestBeforeCategories: ['beauty', 'grocery'],
+    // Risk rules that hold an order for a person to check before it is sent out.
+    holdCodAbove: 1000000,
+    holdNewAccountMs: 24 * 3600_000,
+    holdBulkQty: 6,
+  },
   adminEmail: env.ADMIN_EMAIL || 'admin@bazaario.local',
   adminPassword: env.ADMIN_PASSWORD || null,
 };

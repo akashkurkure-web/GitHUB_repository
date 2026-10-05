@@ -2,6 +2,8 @@
 const db = require('./db');
 const config = require('./config');
 const { hashPassword } = require('./security');
+const market = require('./market');
+const kyc = require('./kyc');
 
 const CATEGORIES = [
   ['mobiles', 'Mobiles', '📱'],
@@ -65,7 +67,7 @@ const COUPONS = [
 ];
 
 const DESCRIPTION = (title, brand) =>
-  `${title} by ${brand}. Sold and fulfilled by ${config.storeName}. Covered by our ${config.returnWindowDays}-day easy return policy and 100% purchase protection.`;
+  `${title} by ${brand}. Covered by our ${config.returnWindowDays}-day easy return policy and 100% purchase protection.`;
 
 // Drawn by scripts/draw-products.js, in the same order as PRODUCTS.
 const PICTURES = [
@@ -108,14 +110,46 @@ const PICTURES = [
   'washmate-front-load',
   'crispair-air-fryer',
 ];
+// Demo marketplace sellers (blueprint stage 1). They have no sign-in; their offers sit next to Bazaario Direct's,
+// a little dearer or slower, so Direct keeps the best offer until it runs out of stock.
+const SELLERS = [
+  { code: 'S0001', lane: 'standard', name: 'Shree Ganesh Traders', legal: 'Shree Ganesh Traders', gstin: '27ABCPG1234K1Z', city: 'Pune',
+    state: 'Maharashtra', pincode: '411002', fulfilment: 'pickup',
+    offers: [[11, 649, 120, 2], [16, 1349, 40, 2], [17, 579, 200, 1], [20, 369, 150, 2], [26, 2599, 15, 2], [32, 669, 80, 2, '2027-06']] },
+  { code: 'S0002', lane: 'value', name: 'Jaipur Craft House', legal: 'Meena Devi Sharma', enrolment: 'EID080000012345', city: 'Jaipur',
+    state: 'Rajasthan', pincode: '302001', fulfilment: 'self', offers: [[12, 949, 60, 2], [18, 829, 45, 2], [14, 749, 30, 3]] },
+  { code: 'S0003', lane: 'brand', name: 'Nova Official Store', legal: 'Nova Mobility India Private Limited', gstin: '29AAECN4821M1Z',
+    city: 'Bengaluru', state: 'Karnataka', pincode: '560034', fulfilment: 'fulfilled', brand: 'Nova', trademark: '4123456', offers: [[1, 18499, 50, 1]] },
+];
+
+function seedSellers(d, now) {
+  const ins = d.prepare(`INSERT INTO sellers (code, lane, display_name, legal_name, gstin, enrolment_id, pan, brand_name, trademark_no,
+    bank_ifsc, bank_last4, bank_name_at_bank, bank_ref, pickup_city, pickup_state, pickup_pincode, fulfilment, status, created_at, approved_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,'HDFC0001234','4321',?,?,?,?,?,?,'approved',?,?,?)`);
+  const insOffer = d.prepare(`INSERT INTO offers (product_id, seller_id, price, stock, dispatch_days, best_before, active, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,1,?,?)`);
+  for (const s of SELLERS) {
+    const gstin = s.gstin ? s.gstin + kyc.gstinCheckChar(s.gstin) : null;
+    const id = Number(ins.run(s.code, s.lane, s.name, s.legal, gstin, s.enrolment || null, gstin ? gstin.slice(2, 12) : 'BQZPS4512K',
+      s.brand || null, s.trademark || null, s.legal.toUpperCase(), `BENE-DEMO${s.code}`, s.city, s.state, s.pincode, s.fulfilment,
+      now, now, now).lastInsertRowid);
+    for (const [productId, price, stock, days, bestBefore] of s.offers) {
+      insOffer.run(productId, id, price * 100, stock, days, bestBefore || null, now, now);
+      market.syncProduct(d, productId);
+    }
+  }
+}
+
 const pictureOf = (i) => (PICTURES[i] ? `img/products/${PICTURES[i]}.svg` : '');
 
 function seed({ reset = false, log = console.log } = {}) {
   const d = db.get();
   if (reset) {
-    d.exec(`DELETE FROM order_items; DELETE FROM orders; DELETE FROM reviews; DELETE FROM cart_items; DELETE FROM wishlist;
-            DELETE FROM addresses; DELETE FROM sessions; DELETE FROM products; DELETE FROM categories; DELETE FROM coupons;
-            DELETE FROM audit_log; DELETE FROM users;`);
+    d.exec(`DELETE FROM payout_lines; DELETE FROM claims; DELETE FROM payouts; DELETE FROM order_routes; DELETE FROM returns;
+            DELETE FROM order_events; DELETE FROM notifications; DELETE FROM wallet_ledger; DELETE FROM ticket_messages; DELETE FROM tickets;
+            DELETE FROM order_items; DELETE FROM orders; DELETE FROM reviews; DELETE FROM cart_items; DELETE FROM wishlist; DELETE FROM offers;
+            DELETE FROM addresses; DELETE FROM sessions; DELETE FROM products; DELETE FROM categories; DELETE FROM coupons; DELETE FROM sellers;
+            DELETE FROM otp_codes; DELETE FROM audit_log; DELETE FROM users;`);
   }
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
   if (already > 0) {
@@ -144,6 +178,9 @@ function seed({ reset = false, log = console.log } = {}) {
       insProd.run(title, brand, catId[cat], DESCRIPTION(title, brand), JSON.stringify(features), price * 100, mrp * 100,
         stock, Math.min(ra, 4.9), rc, rc * 3, emoji, color, pictureOf(i), express, deal, now - i * 3600_000);
     });
+
+    market.backfill(d);
+    seedSellers(d, now);
 
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);

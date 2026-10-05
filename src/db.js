@@ -229,6 +229,116 @@ CREATE TABLE IF NOT EXISTS otp_codes (
   sent_at INTEGER NOT NULL
 );
 
+-- ---------- Marketplace (blueprint stages 1, 2, 6, 7 and 10) ----------
+-- Everyone who sells on Bazaario. Bazaario Direct (our own stock) is the seller with code 'direct' and no user.
+CREATE TABLE IF NOT EXISTS sellers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+  lane TEXT NOT NULL CHECK (lane IN ('direct','brand','standard','value')),
+  display_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  legal_name TEXT NOT NULL,
+  gstin TEXT,
+  enrolment_id TEXT,
+  pan TEXT,
+  brand_name TEXT,
+  trademark_no TEXT,
+  bank_ifsc TEXT,
+  bank_last4 TEXT,
+  bank_name_at_bank TEXT,
+  bank_ref TEXT,
+  phone TEXT,
+  email TEXT,
+  pickup_line1 TEXT,
+  pickup_city TEXT,
+  pickup_state TEXT NOT NULL,
+  pickup_pincode TEXT,
+  fulfilment TEXT NOT NULL CHECK (fulfilment IN ('fulfilled','pickup','self')),
+  status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','suspended')),
+  status_note TEXT NOT NULL DEFAULT '',
+  score INTEGER,
+  created_at INTEGER NOT NULL,
+  approved_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+-- One product page, many sellers: each seller adds an offer (price, stock, dispatch time) to the same listing.
+CREATE TABLE IF NOT EXISTS offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  seller_id INTEGER NOT NULL REFERENCES sellers(id),
+  price INTEGER NOT NULL CHECK (price > 0),
+  stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  dispatch_days INTEGER NOT NULL DEFAULT 1 CHECK (dispatch_days BETWEEN 1 AND 7),
+  best_before TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (product_id, seller_id)
+);
+CREATE INDEX IF NOT EXISTS idx_offers_seller ON offers(seller_id);
+
+-- Which seller each order was sent to, and what they did with it (blueprint stage 6, routing).
+CREATE TABLE IF NOT EXISTS order_routes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  seller_id INTEGER NOT NULL REFERENCES sellers(id),
+  outcome TEXT NOT NULL CHECK (outcome IN ('waiting','accepted','rejected','expired','seller_cancelled')),
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_routes_seller ON order_routes(seller_id);
+CREATE INDEX IF NOT EXISTS idx_routes_order ON order_routes(order_id);
+
+-- Seller claims for returns that came back used, damaged or wrong (blueprint stage 9).
+CREATE TABLE IF NOT EXISTS claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id),
+  seller_id INTEGER NOT NULL REFERENCES sellers(id),
+  reason TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL CHECK (status IN ('open','approved','rejected')),
+  amount INTEGER NOT NULL DEFAULT 0,
+  decision_note TEXT NOT NULL DEFAULT '',
+  payout_id INTEGER REFERENCES payouts(id),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Seller payouts (blueprint stage 10). Each payout has one line per settled order or approved claim.
+CREATE TABLE IF NOT EXISTS payouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payout_no TEXT NOT NULL UNIQUE,
+  seller_id INTEGER NOT NULL REFERENCES sellers(id),
+  gross INTEGER NOT NULL,
+  commission INTEGER NOT NULL,
+  fees INTEGER NOT NULL,
+  gst_on_fees INTEGER NOT NULL,
+  tcs INTEGER NOT NULL,
+  tds INTEGER NOT NULL,
+  adjustments INTEGER NOT NULL DEFAULT 0,
+  net INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('paid','failed')),
+  utr TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payout_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payout_id INTEGER NOT NULL REFERENCES payouts(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES orders(id),
+  claim_id INTEGER REFERENCES claims(id),
+  gross INTEGER NOT NULL DEFAULT 0,
+  commission INTEGER NOT NULL DEFAULT 0,
+  fees INTEGER NOT NULL DEFAULT 0,
+  gst_on_fees INTEGER NOT NULL DEFAULT 0,
+  tcs INTEGER NOT NULL DEFAULT 0,
+  tds INTEGER NOT NULL DEFAULT 0,
+  adjustment INTEGER NOT NULL DEFAULT 0,
+  net INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -259,6 +369,39 @@ function open(file = config.dbFile) {
   migrate(db);
   return db;
 }
+
+// Columns added after the first release. They are added here (not in SCHEMA) so new and upgraded stores match.
+const ADDED_COLUMNS = [
+  ['products', 'image', "TEXT NOT NULL DEFAULT ''"],
+  // Marketplace: the winning offer is cached on the product (price, stock, seller), so search and sorting stay simple.
+  ['products', 'best_offer_id', 'INTEGER'],
+  ['products', 'seller_id', 'INTEGER'],
+  ['products', 'assured', 'INTEGER NOT NULL DEFAULT 0'],
+  ['products', 'offer_count', 'INTEGER NOT NULL DEFAULT 0'],
+  // Mandatory details (Legal Metrology and GST): HSN code, GST rate, country of origin, manufacturer, category specs.
+  ['products', 'hsn', "TEXT NOT NULL DEFAULT ''"],
+  ['products', 'gst_rate', 'INTEGER NOT NULL DEFAULT 18'],
+  ['products', 'origin', "TEXT NOT NULL DEFAULT 'India'"],
+  ['products', 'manufacturer', "TEXT NOT NULL DEFAULT ''"],
+  ['products', 'specs', "TEXT NOT NULL DEFAULT '{}'"],
+  // Catalog quality check for listings created by sellers.
+  ['products', 'qc_status', "TEXT NOT NULL DEFAULT 'approved'"],
+  ['products', 'qc_note', "TEXT NOT NULL DEFAULT ''"],
+  ['products', 'created_by_seller', 'INTEGER'],
+  ['cart_items', 'offer_id', 'INTEGER'],
+  ['order_items', 'offer_id', 'INTEGER'],
+  ['order_items', 'hsn', "TEXT NOT NULL DEFAULT ''"],
+  ['order_items', 'gst_rate', 'INTEGER NOT NULL DEFAULT 18'],
+  // One checkout makes one order per seller; they share a checkout reference and one payment.
+  ['orders', 'seller_id', 'INTEGER'],
+  ['orders', 'checkout_ref', 'TEXT'],
+  ['orders', 'accept_by', 'INTEGER'],
+  ['orders', 'dispatch_by', 'INTEGER'],
+  ['orders', 'shipped_at', 'INTEGER'],
+  ['orders', 'hold_reason', 'TEXT'],
+  ['orders', 'route_reason', "TEXT NOT NULL DEFAULT ''"],
+  ['orders', 'payout_id', 'INTEGER'],
+];
 
 /** Brings databases created by older versions up to the current schema. */
 /**
@@ -303,8 +446,6 @@ function checkColumnNames(d) {
 }
 
 function migrate(d) {
-  const cols = d.prepare('PRAGMA table_info(products)').all().map((c) => c.name);
-  if (!cols.includes('image')) d.exec("ALTER TABLE products ADD COLUMN image TEXT NOT NULL DEFAULT ''");
 
   // Orders gained new statuses (confirmed, out for delivery, failed delivery, RTO), wallet, EMI and delivery speed.
   // SQLite cannot change a CHECK rule in place, so the table is rebuilt once, keeping every row.
@@ -329,6 +470,17 @@ function migrate(d) {
       d.exec('PRAGMA foreign_keys = ON');
     }
   }
+
+  const exists = (t) => !!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+  for (const [table, col, decl] of ADDED_COLUMNS) {
+    if (!exists(table)) continue;
+    const have = d.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!have.includes(col)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+  }
+  d.exec('CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_id)');
+  d.exec('CREATE INDEX IF NOT EXISTS idx_orders_checkout ON orders(checkout_ref)');
+  // Every product gets a Bazaario Direct offer from its old price and stock (needs the market module, loaded late).
+  if (exists('sellers')) require('./market').backfill(d);
 }
 
 function get() {

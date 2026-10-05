@@ -140,6 +140,11 @@ test('failed delivery: buyer picks a new time; two refused COD orders pause COD'
   for (let i = 0; i < 2; i++) {
     await c.call('POST', '/cart', { productId: 20, qty: 1 });
     const o = (await c.call('POST', '/orders', { addressId, paymentMethod: 'cod' })).data;
+    if (i === 1) {
+      // After one refused COD order, the next COD order is held for a person to check (routing risk rule).
+      assert.equal((await c.call('GET', `/orders/${o.orderId}`)).data.order.hold_reason, 'review');
+      assert.equal((await a.call('POST', `/admin/orders/${o.orderId}/release`)).status, 200);
+    }
     await ship(a, o.orderId, ['packed', 'shipped', 'out_for_delivery', 'delivery_failed']);
     if (i === 0) {
       assert.equal((await c.call('POST', `/orders/${o.orderId}/reattempt`, { when: 'someday' })).status, 400);
