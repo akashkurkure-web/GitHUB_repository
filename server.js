@@ -65,9 +65,18 @@ function createApp() {
     shippingFee: config.shippingFee,
     maxQtyPerItem: config.maxQtyPerItem,
     returnWindowDays: config.returnWindowDays,
+    expressFee: config.expressFee,
+    emiMinOrder: config.emiMinOrder,
+    codMaxOrder: config.codMaxOrder,
+    expressCities: Object.values(require('./src/delivery').EXPRESS_CITIES),
+    testMode: { payments: config.paymentProvider === 'test', courier: config.courierProvider === 'test', sms: config.smsProvider === 'test' },
+    otpSignIn: config.otpEnabled,
+    grievanceOfficer: config.grievanceOfficer,
+    companyName: config.companyName,
   }));
   api.use('/auth', require('./src/routes/auth'));
   api.use('/', require('./src/routes/catalog'));
+  api.use('/', require('./src/routes/support'));
   api.use('/', require('./src/routes/orders').router);
   api.use('/admin', require('./src/routes/admin'));
   api.use('/', require('./src/routes/shopping'));

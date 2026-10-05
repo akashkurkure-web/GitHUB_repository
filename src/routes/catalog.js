@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const db = require('../db');
+const delivery = require('../delivery');
 const { HttpError, requireAuth, audit, v } = require('../security');
 
 const router = express.Router();
@@ -81,6 +82,16 @@ router.get('/products/suggest', (req, res) => {
     "SELECT id, title FROM products WHERE active = 1 AND (title LIKE ? ESCAPE '\\' OR brand LIKE ? ESCAPE '\\') ORDER BY sold_count DESC LIMIT 8"
   ).all(like, like);
   res.json({ suggestions: rows });
+});
+
+// Delivery promise for a PIN code: which speeds are available, when the parcel arrives, and whether COD works.
+router.get('/delivery', (req, res) => {
+  const pincode = v.pincode(req.query.pincode);
+  const ids = typeof req.query.products === 'string' ? req.query.products.split(',').slice(0, 50).map(Number).filter(Number.isInteger) : [];
+  const products = ids.length
+    ? db.get().prepare(`SELECT id, express FROM products WHERE active = 1 AND id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+    : [];
+  res.json(delivery.options(pincode, products));
 });
 
 router.get('/products/:id', (req, res) => {

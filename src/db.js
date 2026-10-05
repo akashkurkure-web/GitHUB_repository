@@ -118,15 +118,22 @@ CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_no TEXT NOT NULL UNIQUE,
   user_id INTEGER NOT NULL REFERENCES users(id),
-  status TEXT NOT NULL CHECK (status IN ('placed','packed','shipped','delivered','cancelled','return_requested','returned')),
+  status TEXT NOT NULL CHECK (status IN ('placed','confirmed','packed','shipped','out_for_delivery','delivery_failed','delivered',
+    'rto','cancelled','return_requested','returned')),
   subtotal INTEGER NOT NULL,
   discount INTEGER NOT NULL DEFAULT 0,
   shipping INTEGER NOT NULL DEFAULT 0,
   total INTEGER NOT NULL,
+  wallet_used INTEGER NOT NULL DEFAULT 0,
   coupon_code TEXT,
-  payment_method TEXT NOT NULL CHECK (payment_method IN ('cod','card','upi')),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('cod','card','upi','emi','wallet')),
   payment_status TEXT NOT NULL CHECK (payment_status IN ('pending','paid','refunded')),
   payment_ref TEXT,
+  emi_months INTEGER,
+  delivery_speed TEXT NOT NULL DEFAULT 'standard' CHECK (delivery_speed IN ('standard','express')),
+  promised_at INTEGER,
+  courier TEXT,
+  awb TEXT,
   address TEXT NOT NULL,
   idempotency_key TEXT,
   created_at INTEGER NOT NULL,
@@ -143,6 +150,83 @@ CREATE TABLE IF NOT EXISTS order_items (
   emoji TEXT NOT NULL,
   price INTEGER NOT NULL,
   qty INTEGER NOT NULL
+);
+
+-- Every status change of an order, shown to the buyer as a tracking timeline.
+CREATE TABLE IF NOT EXISTS order_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events(order_id);
+
+-- SMS, WhatsApp and email messages sent to buyers (the outbox; the test provider only records them).
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL CHECK (channel IN ('sms','whatsapp','email')),
+  recipient TEXT NOT NULL,
+  body TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS returns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL,
+  comment TEXT NOT NULL DEFAULT '',
+  refund_to TEXT NOT NULL CHECK (refund_to IN ('wallet','source')),
+  status TEXT NOT NULL CHECK (status IN ('requested','pickup_scheduled','refunded','rejected')),
+  note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Bazaario wallet: credits (refunds) are positive, spends are negative. Balance = SUM(amount).
+CREATE TABLE IF NOT EXISTS wallet_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  order_id INTEGER REFERENCES orders(id),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_user ON wallet_ledger(user_id);
+
+CREATE TABLE IF NOT EXISTS tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_no TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES orders(id),
+  category TEXT NOT NULL CHECK (category IN ('order','delivery','return','payment','account','grievance','other')),
+  subject TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open','answered','closed')),
+  due_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ticket_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author TEXT NOT NULL CHECK (author IN ('customer','agent','system')),
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+-- One-time sign-in codes sent by SMS. Only a hash of the code is stored.
+CREATE TABLE IF NOT EXISTS otp_codes (
+  phone TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL,
+  sent_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -168,6 +252,30 @@ function open(file = config.dbFile) {
 function migrate(d) {
   const cols = d.prepare('PRAGMA table_info(products)').all().map((c) => c.name);
   if (!cols.includes('image')) d.exec("ALTER TABLE products ADD COLUMN image TEXT NOT NULL DEFAULT ''");
+
+  // Orders gained new statuses (confirmed, out for delivery, failed delivery, RTO), wallet, EMI and delivery speed.
+  // SQLite cannot change a CHECK rule in place, so the table is rebuilt once, keeping every row.
+  const ordersSql = d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get().sql;
+  if (!ordersSql.includes('out_for_delivery')) {
+    const create = SCHEMA.slice(SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS orders ('), SCHEMA.indexOf('CREATE TABLE IF NOT EXISTS order_items'))
+      .replace('CREATE TABLE IF NOT EXISTS orders (', 'CREATE TABLE orders_new (');
+    const keep = 'id, order_no, user_id, status, subtotal, discount, shipping, total, coupon_code, payment_method, payment_status, ' +
+      'payment_ref, address, idempotency_key, created_at, updated_at, delivered_at';
+    d.exec('PRAGMA foreign_keys = OFF');
+    try {
+      d.exec('BEGIN IMMEDIATE');
+      d.exec(create);
+      d.exec(`INSERT INTO orders_new (${keep}) SELECT ${keep} FROM orders`);
+      d.exec('DROP TABLE orders');
+      d.exec('ALTER TABLE orders_new RENAME TO orders');
+      d.exec('COMMIT');
+    } catch (err) {
+      d.exec('ROLLBACK');
+      throw err;
+    } finally {
+      d.exec('PRAGMA foreign_keys = ON');
+    }
+  }
 }
 
 function get() {
@@ -193,4 +301,4 @@ function close() {
   db = undefined;
 }
 
-module.exports = { open, get, tx, close };
+module.exports = { open, get, tx, close, migrate };

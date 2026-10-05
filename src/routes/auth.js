@@ -1,8 +1,10 @@
 'use strict';
+const crypto = require('node:crypto');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const db = require('../db');
+const notify = require('../notify');
 const {
   HttpError, hashPassword, verifyPassword, DUMMY_HASH, passwordPolicyError,
   createSession, revokeCurrentSession, destroySession, destroyAllSessions, requireAuth, audit, v,
@@ -74,6 +76,59 @@ router.post('/login', authLimiter, (req, res) => {
   const csrfToken = createSession(res, req, user.id);
   req.user = user;
   audit(req, 'user.login');
+  res.json({ user: publicUser(user), csrfToken });
+});
+
+// ---------- Sign in with a one-time code sent to the mobile number (blueprint stage 5) ----------
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const otpHash = (phone, code) => sha(`${phone}:${code}`);
+
+router.post('/otp/request', authLimiter, (req, res) => {
+  if (!config.otpEnabled) throw new HttpError(503, 'Sign-in with a mobile code is not available yet. Please use your email and password.');
+  const phone = v.phone(req.body.phone);
+  const generic = { ok: true, message: `If an account uses ${phone}, we have sent it a 6-digit code.` };
+  // Most recently created account with this number, so a reused number reaches its current owner.
+  const user = db.get().prepare('SELECT id FROM users WHERE phone = ? ORDER BY id DESC LIMIT 1').get(phone);
+  if (!user) {
+    if (config.smsProvider === 'test') throw new HttpError(404, 'No account uses this mobile number. Create an account or sign in with email.');
+    return res.json(generic);
+  }
+  const now = Date.now();
+  const prev = db.get().prepare('SELECT sent_at FROM otp_codes WHERE phone = ?').get(phone);
+  if (prev && now - prev.sent_at < config.otpResendMs) throw new HttpError(429, 'Please wait 30 seconds before asking for another code.');
+  const code = String(crypto.randomInt(100000, 1000000));
+  db.tx((d) => {
+    d.prepare(`INSERT INTO otp_codes (phone, user_id, code_hash, attempts, expires_at, sent_at) VALUES (?,?,?,0,?,?)
+      ON CONFLICT(phone) DO UPDATE SET user_id = excluded.user_id, code_hash = excluded.code_hash, attempts = 0,
+      expires_at = excluded.expires_at, sent_at = excluded.sent_at`).run(phone, user.id, otpHash(phone, code), now + config.otpTtlMs, now);
+    notify.send(d, { userId: user.id, channel: 'sms', recipient: phone, body: `${code} is your ${config.storeName} sign-in code. It expires in 5 minutes. Never share it.` });
+  });
+  audit(req, 'user.otp_sent', { userId: user.id });
+  // Test mode only: with no SMS partner connected, the code is shown on screen so the flow can be tried.
+  res.json(config.smsProvider === 'test' ? { ...generic, testCode: code } : generic);
+});
+
+router.post('/otp/verify', authLimiter, (req, res) => {
+  if (!config.otpEnabled) throw new HttpError(503, 'Sign-in with a mobile code is not available yet.');
+  const phone = v.phone(req.body.phone);
+  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+  const wrong = new HttpError(401, 'That code is not right or has expired. Please try again or ask for a new code.');
+  const row = db.get().prepare('SELECT * FROM otp_codes WHERE phone = ?').get(phone);
+  if (!row || row.expires_at < Date.now() || row.attempts >= config.otpMaxAttempts) throw wrong;
+  const a = Buffer.from(otpHash(phone, code));
+  const b = Buffer.from(row.code_hash);
+  if (!/^\d{6}$/.test(code) || !crypto.timingSafeEqual(a, b)) {
+    db.get().prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE phone = ?').run(phone);
+    throw wrong;
+  }
+  db.get().prepare('DELETE FROM otp_codes WHERE phone = ?').run(phone);
+  const user = db.get().prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+  if (!user) throw wrong;
+  if (user.locked_until > Date.now()) throw new HttpError(423, 'This account is temporarily locked after too many failed attempts. Try again later.');
+  revokeCurrentSession(req);
+  const csrfToken = createSession(res, req, user.id);
+  req.user = user;
+  audit(req, 'user.login_otp');
   res.json({ user: publicUser(user), csrfToken });
 });
 
