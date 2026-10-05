@@ -47,6 +47,38 @@ router.post('/register', authLimiter, (req, res) => {
   res.status(201).json({ user: publicUser(user), csrfToken });
 });
 
+// First-run setup: until the store has an owner, the first person to sign in creates the owner account.
+const hasOwner = () => !!db.get().prepare("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").get();
+
+router.get('/setup', (_req, res) => res.json({ needed: !hasOwner() }));
+
+router.post('/setup', authLimiter, (req, res) => {
+  const name = v.str(req.body.name, 'Name', { min: 2, max: 60 });
+  const email = v.email(req.body.email);
+  const pwErr = passwordPolicyError(req.body.password);
+  if (pwErr) throw new HttpError(400, pwErr);
+  const hash = hashPassword(req.body.password);
+  const user = db.tx(() => {
+    if (hasOwner()) throw new HttpError(409, 'This store already has an owner. Please sign in.');
+    const existing = db.get().prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existing) {
+      // A shopper account with this email becomes the owner only with its own password.
+      const u = db.get().prepare('SELECT * FROM users WHERE id = ?').get(existing.id);
+      if (!verifyPassword(req.body.password, u.password_hash)) throw new HttpError(409, 'An account with this email already exists. Use its password, or a different email.');
+      db.get().prepare("UPDATE users SET role = 'admin', name = ? WHERE id = ?").run(name, u.id);
+      return db.get().prepare('SELECT * FROM users WHERE id = ?').get(u.id);
+    }
+    const info = db.get().prepare("INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,'admin',?)")
+      .run(name, email, hash, Date.now());
+    return db.get().prepare('SELECT * FROM users WHERE id = ?').get(Number(info.lastInsertRowid));
+  });
+  revokeCurrentSession(req);
+  const csrfToken = createSession(res, req, user.id);
+  req.user = user;
+  audit(req, 'owner.setup');
+  res.status(201).json({ user: publicUser(user), csrfToken });
+});
+
 router.post('/login', authLimiter, (req, res) => {
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
