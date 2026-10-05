@@ -33,7 +33,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 1. Sign up at <https://render.com> using **Sign in with GitHub**.
 2. Click **New + → Blueprint**, pick this repository, and Render reads `render.yaml`.
    *Or use the button:* [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/akashkurkure-web/GitHUB_repository)
-3. When asked, enter **ADMIN_EMAIL** and **ADMIN_PASSWORD** (choose a strong one) → **Apply**.
+3. Click **Apply**. No settings to fill in.
 4. After about 3-5 minutes your store is live at `https://bazaario-xxxx.onrender.com`.
    *To use your own domain:* Settings → Custom Domains.
 5. Limits of the free plan:
@@ -122,18 +122,16 @@ npm install
 ```
 *Workaround behind a corporate proxy:* `npm config set proxy http://proxy:port` and `npm config set https-proxy http://proxy:port`.
 
-**Step 4: Choose your admin login and start**
+**Step 4: Start**
 ```bash
-# macOS / Linux
-ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start
-# Windows PowerShell
-$env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm start
+npm start
 ```
-*If you skip the variables,* a random admin password is printed **once** in the console on first start. Copy it.
+**First visit: create your owner account.** Open the store and click **Sign in**. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you land in Bazaario Studio. This happens only once; after that **Sign in** is the normal login. Do this right after deploying, before you share the link.
+*Optional:* to create the owner from the command line instead, start with `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start`.
 
 **Step 5: Open the store**
 - Shop: <http://localhost:3000>
-- Bazaario Studio (admin): sign in with the admin account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
+- Bazaario Studio (admin): sign in with your owner account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
 
 **Step 6: Try a test purchase**
 1. Register a customer account (top right → *Start here*).
@@ -143,7 +141,7 @@ $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm st
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
 
 **Reset demo data:** stop the server, then `npm run seed` (or delete the `data/` folder).
-**Run automated tests:** `npm test` (13 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders and admin).
+**Run automated tests:** `npm test` (17 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders and admin).
 
 ---
 
@@ -152,7 +150,6 @@ $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="YourStr0ngPass"; npm st
 ```bash
 docker build -t bazaario .
 docker run -d --name bazaario -p 3000:3000 \
-  -e ADMIN_EMAIL=you@example.com -e ADMIN_PASSWORD='YourStr0ngPass' \
   -v bazaario-data:/app/data --restart unless-stopped bazaario
 ```
 The named volume `bazaario-data` keeps the database across upgrades.

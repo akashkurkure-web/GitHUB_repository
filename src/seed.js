@@ -1,5 +1,4 @@
 'use strict';
-const crypto = require('node:crypto');
 const db = require('./db');
 const config = require('./config');
 const { hashPassword } = require('./security');
@@ -145,14 +144,12 @@ function seed({ reset = false, log = console.log } = {}) {
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);
 
-    let adminPassword = config.adminPassword;
-    if (!adminPassword) {
-      adminPassword = crypto.randomBytes(9).toString('base64url') + '9a';
-      log(`\n[seed] Admin account created: ${config.adminEmail}  password: ${adminPassword}\n` +
-          '[seed] Set ADMIN_EMAIL / ADMIN_PASSWORD env vars to choose your own. This password is shown only once.\n');
+    // With ADMIN_PASSWORD set, the owner account is created up front. Without it, the store opens with
+    // no owner and the first visit to Sign in asks the owner to create their account (POST /api/auth/setup).
+    if (config.adminPassword) {
+      d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
+        .run('Store Admin', config.adminEmail, hashPassword(config.adminPassword), 'admin', now);
     }
-    d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
-      .run('Store Admin', config.adminEmail, hashPassword(adminPassword), 'admin', now);
   });
 }
 
