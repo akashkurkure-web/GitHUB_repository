@@ -1,8 +1,8 @@
 'use strict';
 // Vercel entry point: one serverless function serves the whole store (pages, API, fonts, pictures).
-// Vercel's disk is read-only except /tmp, and /tmp is wiped whenever the function restarts, so a
-// Vercel deployment is a preview: the catalogue is re-seeded on each cold start and new accounts,
-// bags and orders do not last. Use Render (render.yaml) or a hosted database for a real store.
+// Data: connect a Turso database in Vercel (Storage -> Turso). Vercel then sets TURSO_DATABASE_URL and
+// TURSO_AUTH_TOKEN, and accounts, orders and products are kept for good and shared by every instance.
+// Without it the store falls back to SQLite in /tmp, which Vercel wipes on restart (preview only).
 process.env.DB_FILE = process.env.DB_FILE || '/tmp/bazaario.db';
 process.env.UPLOAD_DIR = process.env.UPLOAD_DIR || '/tmp/uploads';
 process.env.INLINE_IMAGES = process.env.INLINE_IMAGES || '1';

@@ -120,13 +120,17 @@ function seed({ reset = false, log = console.log } = {}) {
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
   if (already > 0) {
     // Older stores were seeded before pictures existed: fill in only products that still have none.
-    const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
-    PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    if (d.prepare("SELECT 1 FROM products WHERE image = '' LIMIT 1").get()) {
+      const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
+      PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    }
     return;
   }
 
   const now = Date.now();
   db.tx(() => {
+    // Re-check inside the transaction: two servers starting together must not both seed a shared database.
+    if (d.prepare('SELECT COUNT(*) AS n FROM products').get().n > 0) return;
     const insCat = d.prepare('INSERT INTO categories (slug, name, icon) VALUES (?,?,?)');
     for (const c of CATEGORIES) insCat.run(...c);
     const catId = Object.fromEntries(d.prepare('SELECT slug, id FROM categories').all().map((r) => [r.slug, r.id]));

@@ -148,23 +148,61 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
-  action TEXT NOT NULL,
+  "action" TEXT NOT NULL, -- quoted: libSQL servers upper-case unquoted keyword names (ACTION)
   detail TEXT,
   ip TEXT,
   created_at INTEGER NOT NULL
 );
 `;
 
+/**
+ * Opens the store database. With TURSO_DATABASE_URL set (Vercel's Turso integration adds it), the data lives
+ * in a hosted libSQL database so it survives restarts and is shared by every server instance; otherwise it is
+ * a local SQLite file. Both drivers expose the same synchronous prepare/get/all/run/exec API.
+ */
 function open(file = config.dbFile) {
   if (db) return db;
-  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
-  db = new DatabaseSync(file);
-  db.exec(SCHEMA);
+  if (config.databaseUrl && file !== ':memory:') {
+    const Database = require('libsql');
+    db = libsqlAdapter(new Database(config.databaseUrl, { authToken: config.databaseToken }));
+    db.exec(SCHEMA.replace('PRAGMA journal_mode = WAL;', '')); // WAL is a local-file setting
+    checkColumnNames(db);
+  } else {
+    if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
+    db = new DatabaseSync(file);
+    db.exec(SCHEMA);
+  }
   migrate(db);
   return db;
 }
 
 /** Brings databases created by older versions up to the current schema. */
+/** Makes a libsql connection look exactly like node:sqlite: rows without libsql's extra `_metadata` field. */
+function libsqlAdapter(raw) {
+  const clean = (row) => { if (row && typeof row === 'object') delete row._metadata; return row; };
+  return {
+    prepare(sql) {
+      const st = raw.prepare(sql);
+      return {
+        get: (...args) => clean(st.get(...args)),
+        all: (...args) => st.all(...args).map(clean),
+        iterate: function* (...args) { for (const row of st.iterate(...args)) yield clean(row); },
+        run: (...args) => { const r = st.run(...args); return { changes: r.changes, lastInsertRowid: r.lastInsertRowid }; },
+      };
+    },
+    exec: (sql) => raw.exec(sql),
+    close: () => raw.close(),
+  };
+}
+
+/** A libSQL server rewrites unquoted keyword column names in upper case; the app reads lower-case names. */
+function checkColumnNames(d) {
+  for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
+    const bad = d.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name).filter((c) => c !== c.toLowerCase());
+    if (bad.length) throw new Error(`Column names ${bad.join(', ')} in table ${name} must be quoted in the schema (libSQL upper-cases keywords).`);
+  }
+}
+
 function migrate(d) {
   const cols = d.prepare('PRAGMA table_info(products)').all().map((c) => c.name);
   if (!cols.includes('image')) d.exec("ALTER TABLE products ADD COLUMN image TEXT NOT NULL DEFAULT ''");

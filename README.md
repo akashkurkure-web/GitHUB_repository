@@ -41,6 +41,12 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
    - **Its disk is wiped on every restart or redeploy**, so orders and accounts reset to demo data.
    - *Workaround for permanent data:* upgrade to the Starter plan, add a **Disk** mounted at `/var/data`, and set the env var `DB_FILE=/var/data/bazaario.db`.
 
+### Option C: Vercel with a free Turso database (data kept for good)
+1. Sign in at <https://vercel.com> with GitHub → **Add New → Project** → import this repository → **Deploy**.
+2. In the project open **Storage → Create Database → Turso** (free) and connect it to the project, ticking **Production** and **Preview**. Vercel adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for you.
+3. **Deployments → ⋯ → Redeploy**. Open the site, click **Sign in** and create your owner account.
+   *Without step 2* the store still runs, but Vercel wipes its data on restart, so treat it as a preview.
+
 *Other hosts that work the same way:* Railway, Fly.io, Azure App Service, AWS Elastic Beanstalk. Use the Docker image from Section 4.
 
 ---

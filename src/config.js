@@ -9,6 +9,9 @@ module.exports = {
   // Number of reverse-proxy hops to trust for client IP / protocol (Render, Codespaces, Nginx).
   trustProxy: env.TRUST_PROXY !== undefined ? Number(env.TRUST_PROXY) : (env.NODE_ENV === 'production' ? 1 : 0),
   port: Number(env.PORT) || 3000,
+  // Hosted libSQL / Turso database (keeps data across restarts). Unset = local SQLite file at dbFile.
+  databaseUrl: env.TURSO_DATABASE_URL || env.LIBSQL_URL || '',
+  databaseToken: env.TURSO_AUTH_TOKEN || env.LIBSQL_AUTH_TOKEN || '',
   dbFile: env.DB_FILE || path.join(__dirname, '..', 'data', 'bazaario.db'),
   // Product photos uploaded in Bazaario Studio. Keep this on persistent storage, next to the database.
   uploadDir: env.UPLOAD_DIR || path.join(__dirname, '..', 'data', 'uploads'),
