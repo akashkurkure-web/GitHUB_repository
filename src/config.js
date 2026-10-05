@@ -21,6 +21,9 @@ module.exports = {
   storeName: env.STORE_NAME || 'Bazaario',
   // Session lifetime (ms) - 7 days, sliding.
   sessionTtlMs: 7 * 24 * 60 * 60 * 1000,
+  // Admin portal: sessions last at most 12 hours and end after 30 minutes without activity.
+  adminSessionTtlMs: 12 * 60 * 60 * 1000,
+  adminIdleMs: 30 * 60 * 1000,
   // Account lockout policy
   maxFailedLogins: 5,
   lockoutMs: 15 * 60 * 1000,

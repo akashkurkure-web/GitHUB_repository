@@ -4,6 +4,8 @@
 'use strict';
 
 const state = { user: null, csrf: null, categories: [], config: {}, cartCount: 0, timers: [], wish: new Set() };
+// The same views power the shop (index.html) and the admin portal (admin.html, with admin.js).
+const ADMIN = document.body.dataset.app === 'admin';
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $('#app');
 
@@ -92,7 +94,8 @@ async function api(method, path, body) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
     err.details = data.details;
-    if (res.status === 401 && state.user) { state.user = null; state.csrf = null; renderHeader(); }
+    if (res.status === 401 && ADMIN && path.startsWith('/admin/') && !/^\/admin\/auth\/(login|verify|setup)/.test(path)) { if (state.user) adminSignedOut(err.message); }
+    else if (res.status === 401 && state.user && !ADMIN) { state.user = null; state.csrf = null; renderHeader(); }
     throw err;
   }
   return data;
@@ -1044,7 +1047,7 @@ async function viewWishlist() {
 // ---------- Auth ----------
 async function viewLogin(params) {
   if (state.user) { location.hash = '#/'; return; }
-  try { if ((await api('GET', '/auth/setup')).needed) return viewSetup(); } catch { /* fall through to normal sign in */ }
+  const setupNeeded = await api('GET', '/auth/setup').then((r) => r.needed, () => false);
   const qp = new URLSearchParams(params);
   const next = qp.get('next');
   const safeNext = next && next.startsWith('#/') ? next : '#/';
@@ -1098,6 +1101,7 @@ async function viewLogin(params) {
     h('div', { class: 'auth-side' }, h('h2', null, 'Welcome back'),
       h('p', null, 'Track orders, keep your wishlist and check out faster.')),
     h('div', { class: 'card' }, h('h1', null, 'Sign in'),
+      setupNeeded ? h('p', { class: 'alert alert-test' }, 'This store has no owner yet. ', h('a', { href: '/admin' }, 'Set it up in the admin portal'), '.') : null,
       state.config.otpSignIn ? h('div', { class: 'tabs' },
         h('button', { type: 'button', class: useOtp ? '' : 'on', onclick: () => switchTo('email') }, 'Email'),
         h('button', { type: 'button', class: useOtp ? 'on' : '', onclick: () => switchTo('otp') }, 'Mobile OTP')) : null,
@@ -1105,32 +1109,6 @@ async function viewLogin(params) {
       h('p', { class: 'muted small' }, 'By continuing you agree to Bazaario\'s ', h('a', { href: '#/page/terms' }, 'terms'), ' and ', h('a', { href: '#/page/privacy' }, 'privacy notice'), '.'),
       h('div', { class: 'divider' }, h('span', null, 'New to Bazaario?')),
       h('a', { class: 'btn btn-outline btn-block', href: '#/register' + (next ? '?next=' + encodeURIComponent(next) : '') }, 'Create an account'))));
-}
-
-// First visit after install: the store has no owner yet, so Sign in becomes "set up your store".
-function viewSetup() {
-  const name = h('input', { required: true, maxLength: 60, autocomplete: 'name', placeholder: 'First and last name' });
-  const email = h('input', { type: 'email', required: true, autocomplete: 'email', maxLength: 254 });
-  const pw = h('input', { type: 'password', required: true, minLength: 8, maxLength: 128, autocomplete: 'new-password', placeholder: 'At least 8 characters' });
-  const pw2 = h('input', { type: 'password', required: true, autocomplete: 'new-password' });
-  const err = h('div', { class: 'alert alert-err hidden', role: 'alert' });
-  const btn = h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' } }, 'Create owner account');
-  mount(h('div', { class: 'auth' },
-    h('div', { class: 'auth-side' }, h('h2', null, 'Welcome to your new store'),
-      h('p', null, 'Create the owner account to run Bazaario Studio: products, photos, prices, stock and orders. You only do this once.')),
-    h('div', { class: 'card' }, h('h1', null, 'Set up your store'), err,
-      h('form', { onsubmit: async (e) => {
-        e.preventDefault(); err.classList.add('hidden');
-        if (pw.value !== pw2.value) { err.textContent = 'Passwords do not match.'; err.classList.remove('hidden'); return; }
-        btn.disabled = true;
-        try {
-          await afterLogin(await api('POST', '/auth/setup', { name: name.value, email: email.value, password: pw.value }), '#/admin');
-          toast('Your store is ready. Welcome to Bazaario Studio!');
-        } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); btn.disabled = false; }
-      } },
-      h('label', null, 'Your name'), name, h('label', null, 'Email'), email,
-      h('label', null, 'Password'), pw, h('div', { class: 'muted small' }, 'At least 8 characters, with letters and numbers.'),
-      h('label', null, 'Re-enter password'), pw2, btn))));
 }
 
 function viewRegister(params) {
@@ -1185,7 +1163,7 @@ async function viewAccount() {
       tile('#/seller', 'Seller Hub', 'Sell on Bazaario: listings, orders and payouts'),
       tile('#/shop', 'Shop Partner', 'Your neighbourhood shop on Bazaario Express'),
       tile('#/resell', 'Resell and earn', 'Share products on WhatsApp with your own margin'),
-      state.user.role === 'admin' ? tile('#/admin', 'Bazaario Studio', 'Products, orders, customers, coupons') : null),
+      state.user.role === 'admin' ? tile('/admin', 'Admin portal', 'Orders, products, staff and settings. Has its own sign-in.') : null),
     h('p', null, h('button', { class: 'btn btn-outline', onclick: logout }, 'Sign out')));
 }
 
@@ -1236,26 +1214,29 @@ async function viewAddresses() {
 
 // ---------- Admin ----------
 async function viewAdmin(params) {
-  if (!state.user) { location.hash = '#/login?next=%23%2Fadmin'; return; }
-  if (state.user.role !== 'admin') { mount(h('div', { class: 'card' }, h('h1', null, 'Access denied'), h('p', null, 'This area is restricted to store administrators.'))); return; }
+  // The store's back office lives in its own portal at /admin, with its own sign-in.
+  if (!ADMIN) { location.replace('/admin' + (params ? '#/admin?' + params : '')); return; }
   const qp = new URLSearchParams(params);
   const tab = qp.get('tab') || 'dashboard';
-  const tabs = h('div', { class: 'tabs' }, [['dashboard', 'Dashboard'], ['orders', 'Orders'], ['returns', 'Returns'], ['helpdesk', 'Help desk'], ['messages', 'Messages'],
-    ['products', 'Products'], ['sellers', 'Sellers'], ['qc', 'Catalog check'], ['claims', 'Claims'], ['settlement', 'Settlement'],
-    ['express', 'Express'], ['riders', 'Riders'], ['resellers', 'Resellers'],
-    ['sales', 'Sales'], ['reports', 'Reports'], ['plus', 'Plus'], ['ads', 'Ads'],
-    ['customers', 'Customers'], ['coupons', 'Coupons'], ['audit', 'Audit log']]
-    .map(([k, l]) => h('button', { class: k === tab ? 'on' : '', onclick: () => { location.hash = `#/admin?tab=${k}`; } }, l)));
   const body = h('div');
+  const allowed = adminSection(tab);
+  if (!allowed) {
+    mount(h('div', { class: 'card empty' }, h('h2', null, 'Not part of your role'),
+      h('p', { class: 'muted' }, 'Your staff role does not include this section. Ask the store owner if you need it.'),
+      h('a', { class: 'btn btn-outline', href: '#/admin' }, 'Go to the dashboard')));
+    return;
+  }
   const test = state.config.testMode || {};
-  mount(h('h1', { class: 'page-title' }, 'Bazaario Studio'), h('p', { class: 'tagline' }, 'Orders, sellers, deliveries, returns, help desk, catalog and payouts'),
-    test.payments || test.courier || test.sms ? h('p', { class: 'alert alert-test' },
-      'Test mode: payments are simulated, tracking numbers are generated here, and SMS and email messages are recorded under Messages instead of being sent. Connect real partner accounts to go live.') : null,
-    tabs, body);
+  mount(tab === 'dashboard' && (test.payments || test.courier || test.sms) ? h('p', { class: 'alert alert-test' },
+    'Test mode: payments are simulated, tracking numbers are generated here, and SMS and email messages are recorded under Messages sent instead of being delivered.') : null, body);
+  if (tab === 'dashboard') add(body, adminGreeting());
+  if (tab === 'staff') await adminStaff(body);
+  if (tab === 'account') await adminAccount(body);
 
   if (tab === 'dashboard') {
     const s = await api('GET', '/admin/stats');
-    const tile = (l, val, href, alert) => h(href ? 'a' : 'div', { class: 'stat' + (alert ? ' stat-alert' : ''), href }, h('span', { class: 'hint' }, l), h('b', null, val));
+    const opens = (href) => href && adminSection(new URLSearchParams(href.split('?')[1]).get('tab')) ? href : null;
+    const tile = (l, val, link, alert) => { const href = opens(link); return h(href ? 'a' : 'div', { class: 'stat' + (alert ? ' stat-alert' : ''), href }, h('span', { class: 'hint' }, l), h('b', null, val)); };
     add(body, h('div', { class: 'stats' },
       tile('Revenue', inr(s.revenue)), tile('Orders', s.orders), tile('Open orders', s.pending, '#/admin?tab=orders'),
       tile('Failed deliveries', s.failedDeliveries, '#/admin?tab=orders&status=delivery_failed', s.failedDeliveries > 0),
@@ -1409,7 +1390,7 @@ async function viewAdmin(params) {
     add(body, h('p', null, h('button', { class: 'btn btn-primary', onclick: () => openForm() }, 'Add a product')), formBox,
       h('div', { class: 'table-wrap' }, h('table', null,
         h('tr', null, ['', 'Product', 'Category', 'Price', 'MRP', 'Stock', 'Status', ''].map((t) => h('th', null, t))),
-        products.map((p) => h('tr', null, h('td', null, pic(p, 'pimg thumb')), h('td', null, h('a', { href: `#/p/${p.id}` }, p.title), h('div', { class: 'hint' }, p.brand)),
+        products.map((p) => h('tr', null, h('td', null, pic(p, 'pimg thumb')), h('td', null, h('a', { href: `/#/p/${p.id}`, target: '_blank', rel: 'noopener' }, p.title), h('div', { class: 'hint' }, p.brand)),
           h('td', null, p.category_name), h('td', null, inr(p.price)), h('td', null, inr(p.mrp)),
           h('td', { class: p.stock < 20 ? 'err' : '' }, p.stock), h('td', null, p.active ? 'Active' : 'Inactive'),
           h('td', null, h('button', { class: 'btn btn-sm btn-outline', onclick: () => openForm(p) }, 'Edit')))))));
@@ -1713,7 +1694,7 @@ function viewApp() {
 async function route() {
   state.timers.forEach(clearInterval);
   state.timers = [];
-  document.title = 'Bazaario - Your Online Bazaar';
+  document.title = ADMIN ? 'Bazaario Admin' : 'Bazaario - Your Online Bazaar';
   const [raw = '/', anchor] = location.hash.slice(1).split('#');
   const [path, query = ''] = (raw || '/').split('?');
   const parts = path.split('/').filter(Boolean);
@@ -1747,6 +1728,13 @@ async function route() {
     refer: () => viewRefer(),
     c: () => viewHub(parts[1]),
   };
+  if (ADMIN) {
+    // The portal shows admin sections and order documents; anything else is a store page.
+    if (!state.user) return;
+    if (!['', 'admin', 'doc'].includes(parts[0] || '')) { location.href = '/#' + raw; return; }
+    if (!parts[0]) { location.replace('#/admin'); return; }
+    adminChrome(parts[0] === 'doc' ? 'orders' : new URLSearchParams(query).get('tab') || 'dashboard');
+  }
   const view = routes[parts[0] || ''];
   if (!view) { viewPage('missing'); return; }
   try {
@@ -1754,9 +1742,10 @@ async function route() {
     const target = anchor && document.getElementById(anchor);
     if (target) target.scrollIntoView(); else window.scrollTo(0, 0);
   } catch (e) {
+    if (e.status === 401 && ADMIN) return; // the portal has already shown its sign-in
     if (e.status === 401) { location.hash = '#/login?next=' + encodeURIComponent('#' + raw); return; }
     mount(h('div', { class: 'card empty' }, h('h1', null, e.status === 404 ? 'Page not found' : 'Something went wrong'),
-      h('p', null, e.message), h('a', { class: 'btn btn-primary', href: '#/' }, 'Go to home page')));
+      h('p', null, e.message), h('a', { class: 'btn btn-primary', href: ADMIN ? '#/admin' : '#/' }, ADMIN ? 'Go to the dashboard' : 'Go to home page')));
   }
 }
 
@@ -1827,4 +1816,4 @@ async function init() {
   route();
 }
 
-init();
+if (!ADMIN) init();

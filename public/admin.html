@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="theme-color" content="#0A4644">
+  <title>Bazaario Admin</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=6">
+  <link rel="stylesheet" href="/admin.css?v=6">
+  <script src="/app.js?v=6" defer></script>
+  <script src="/seller.js?v=6" defer></script>
+  <script src="/express.js?v=6" defer></script>
+  <script src="/reseller.js?v=6" defer></script>
+  <script src="/growth.js?v=6" defer></script>
+  <script src="/admin.js?v=6" defer></script>
+</head>
+<body data-app="admin" class="adm">
+  <div class="adm-gate" id="gate" hidden></div>
+  <div class="adm-shell" id="shell" hidden>
+    <aside class="adm-side" id="side" aria-label="Admin menu">
+      <a class="adm-brand" href="#/admin"><span class="logo-mark" aria-hidden="true">B</span><span><b>Bazaario</b><small>Admin</small></span></a>
+      <nav class="adm-nav" id="nav"></nav>
+      <a class="adm-store" href="/" target="_blank" rel="noopener">View store <span aria-hidden="true">↗</span></a>
+    </aside>
+    <div class="adm-scrim" id="scrim" hidden></div>
+    <div class="adm-main">
+      <header class="adm-top">
+        <button class="adm-burger" id="burger" type="button" aria-label="Open menu" aria-controls="side" aria-expanded="false"><span></span><span></span><span></span></button>
+        <div class="adm-heading"><h1 id="adm-title">Dashboard</h1><span class="hint" id="adm-crumb"></span></div>
+        <span class="adm-pill" id="test-pill" hidden>Test mode</span>
+        <div class="adm-user">
+          <button class="adm-me" id="me-btn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="adm-avatar" id="me-avatar" aria-hidden="true"></span>
+            <span class="adm-me-text"><b id="me-name"></b><small id="me-role"></small></span>
+          </button>
+          <div class="adm-menu" id="me-menu" role="menu" hidden>
+            <a role="menuitem" href="#/admin?tab=account">My account</a>
+            <a role="menuitem" href="/" target="_blank" rel="noopener">View store</a>
+            <button role="menuitem" type="button" id="signout">Sign out</button>
+          </div>
+        </div>
+      </header>
+      <main id="app" class="adm-content" tabindex="-1"></main>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="modal"><div id="modal-body"></div></dialog>
+  <dialog id="idle-modal" class="adm-idle"><div class="adm-idle-body">
+    <h3>Still there?</h3>
+    <p class="muted">For security, you will be signed out in <b id="idle-left">2:00</b> because there has been no activity.</p>
+    <div class="adm-row"><button class="btn btn-primary" id="idle-stay" type="button">Stay signed in</button><button class="btn btn-outline" id="idle-out" type="button">Sign out now</button></div>
+  </div></dialog>
+</body>
+</html>

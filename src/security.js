@@ -4,6 +4,11 @@ const config = require('./config');
 const db = require('./db');
 
 const SESSION_COOKIE = config.isProd ? '__Host-sid' : 'sid';
+// The admin portal has its own session cookie, sent only to /api/admin, so signing in or out of the shop never
+// touches it and a shopping session can never open the portal.
+const ADMIN_COOKIE = config.isProd ? '__Secure-aid' : 'aid';
+const ADMIN_PATH = '/api/admin';
+const isAdminRequest = (req) => req.originalUrl === ADMIN_PATH || req.originalUrl.startsWith(ADMIN_PATH + '/') || req.originalUrl.startsWith(ADMIN_PATH + '?');
 
 class HttpError extends Error {
   constructor(status, message, details) {
@@ -46,58 +51,73 @@ function passwordPolicyError(password) {
 // ---------- Sessions (opaque random token in HttpOnly cookie, only its SHA-256 stored) ----------
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-function createSession(res, req, userId) {
+function createSession(res, req, userId, { admin = false } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
   const csrf = crypto.randomBytes(24).toString('base64url');
   const now = Date.now();
+  const ttl = admin ? config.adminSessionTtlMs : config.sessionTtlMs;
   db.get().prepare(
-    'INSERT INTO sessions (token_hash, user_id, csrf_token, ip, user_agent, expires_at, created_at) VALUES (?,?,?,?,?,?,?)'
-  ).run(sha256(token), userId, csrf, req.ip || '', String(req.get('user-agent') || '').slice(0, 255), now + config.sessionTtlMs, now);
-  res.cookie(SESSION_COOKIE, token, {
+    'INSERT INTO sessions (token_hash, user_id, csrf_token, ip, user_agent, expires_at, created_at, admin_ok, last_active) VALUES (?,?,?,?,?,?,?,?,?)'
+  ).run(sha256(token), userId, csrf, req.ip || '', String(req.get('user-agent') || '').slice(0, 255), now + ttl, now, admin ? 1 : 0, now);
+  res.cookie(admin ? ADMIN_COOKIE : SESSION_COOKIE, token, {
     httpOnly: true,
     secure: config.isProd,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: config.sessionTtlMs,
+    sameSite: admin ? 'strict' : 'lax',
+    path: admin ? ADMIN_PATH : '/',
+    maxAge: ttl,
   });
   return csrf;
 }
 
+const cookieName = (req) => (isAdminRequest(req) ? ADMIN_COOKIE : SESSION_COOKIE);
+
 /** Invalidate the caller's current session server-side (used before issuing a new one on login). */
 function revokeCurrentSession(req) {
-  const token = req.cookies && req.cookies[SESSION_COOKIE];
+  const token = req.cookies && req.cookies[cookieName(req)];
   if (typeof token === 'string') db.get().prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
 }
 
 function destroySession(req, res) {
   revokeCurrentSession(req);
-  res.clearCookie(SESSION_COOKIE, { path: '/', httpOnly: true, secure: config.isProd, sameSite: 'lax' });
+  const admin = isAdminRequest(req);
+  res.clearCookie(cookieName(req), { path: admin ? ADMIN_PATH : '/', httpOnly: true, secure: config.isProd, sameSite: admin ? 'strict' : 'lax' });
 }
 
 function destroyAllSessions(userId) {
   db.get().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
 }
 
-/** Attaches req.user and req.session when a valid session cookie is present. */
+/**
+ * Attaches req.user and req.session when a valid session cookie is present. Requests to /api/admin use the
+ * admin cookie and only admin sessions; every other request uses the shopping cookie and only shopping sessions.
+ * An admin session ends after config.adminIdleMs without a request.
+ */
 function loadSession(req, _res, next) {
-  const token = req.cookies && req.cookies[SESSION_COOKIE];
+  const admin = isAdminRequest(req);
+  const token = req.cookies && req.cookies[admin ? ADMIN_COOKIE : SESSION_COOKIE];
   if (!token || typeof token !== 'string' || token.length > 100) return next();
   const row = db.get().prepare(
-    `SELECT s.token_hash, s.csrf_token, s.expires_at, u.id, u.name, u.email, u.phone, u.role
+    `SELECT s.token_hash, s.csrf_token, s.expires_at, s.admin_ok, s.last_active, u.id, u.name, u.email, u.phone, u.role, u.staff_role
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`
   ).get(sha256(token));
-  if (!row) return next();
+  if (!row || !!row.admin_ok !== admin) return next();
   const now = Date.now();
-  if (row.expires_at < now) {
+  const idle = admin && now - row.last_active > config.adminIdleMs;
+  if (row.expires_at < now || idle || (admin && row.role !== 'admin')) {
     db.get().prepare('DELETE FROM sessions WHERE token_hash = ?').run(row.token_hash);
+    if (admin) req.adminSessionEnded = idle ? 'idle' : 'expired';
     return next();
   }
-  // Sliding expiry, refreshed at most once per hour.
-  if (row.expires_at - now < config.sessionTtlMs - 3600_000) {
+  if (admin) {
+    // Activity keeps the admin session open (written at most once a minute); its 12-hour limit never slides.
+    if (now - row.last_active > 60_000) db.get().prepare('UPDATE sessions SET last_active = ? WHERE token_hash = ?').run(now, row.token_hash);
+  } else if (row.expires_at - now < config.sessionTtlMs - 3600_000) {
+    // Sliding expiry, refreshed at most once per hour.
     db.get().prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').run(now + config.sessionTtlMs, row.token_hash);
   }
-  req.session = { tokenHash: row.token_hash, csrf: row.csrf_token };
+  req.session = { tokenHash: row.token_hash, csrf: row.csrf_token, admin };
   req.user = { id: row.id, name: row.name, email: row.email, phone: row.phone, role: row.role };
+  if (admin) req.user.staffRole = row.staff_role || 'owner';
   next();
 }
 
@@ -106,10 +126,58 @@ function requireAuth(req, _res, next) {
   next();
 }
 
-function requireAdmin(req, _res, next) {
-  if (!req.user) return next(new HttpError(401, 'Please sign in to continue.'));
+/** Signed in to the admin portal (any staff role). */
+function requireAdminSession(req, _res, next) {
+  if (!req.user || !req.session.admin) {
+    const msg = req.adminSessionEnded === 'idle'
+      ? `You were signed out after ${Math.round(config.adminIdleMs / 60000)} minutes without activity. Please sign in again.`
+      : 'Please sign in to the admin portal.';
+    return next(new HttpError(401, msg));
+  }
   if (req.user.role !== 'admin') return next(new HttpError(403, 'You do not have access to this area.'));
   next();
+}
+
+/** Signed in to the admin portal, and the staff role may use this part of it (see src/staff.js). */
+function requireAdmin(req, res, next) {
+  requireAdminSession(req, res, (err) => {
+    if (err) return next(err);
+    const first = req.originalUrl.slice(ADMIN_PATH.length + 1).split(/[/?]/)[0];
+    if (!require('./staff').can(req.user.staffRole, req.method, first)) {
+      return next(new HttpError(403, 'Your staff role does not include this. Ask the store owner if you need it.'));
+    }
+    next();
+  });
+}
+
+/**
+ * Checks an email and password with per-account lockout. Returns the user, or throws one generic error so the
+ * answer never tells whether the email exists.
+ */
+function checkPassword(req, emailIn, passwordIn) {
+  const email = typeof emailIn === 'string' ? emailIn.trim().toLowerCase() : '';
+  const password = typeof passwordIn === 'string' ? passwordIn : '';
+  const generic = new HttpError(401, 'Incorrect email or password.');
+  if (!email || !password || password.length > 128) throw generic;
+  const user = db.get().prepare('SELECT * FROM users WHERE email = ?').get(email);
+  if (!user) {
+    verifyPassword(password, DUMMY_HASH); // equalise timing
+    throw generic;
+  }
+  const now = Date.now();
+  if (user.locked_until > now) {
+    throw new HttpError(423, 'This account is temporarily locked after too many failed attempts. Try again later.');
+  }
+  if (!verifyPassword(password, user.password_hash)) {
+    const failed = user.failed_logins + 1;
+    const lock = failed >= config.maxFailedLogins ? now + config.lockoutMs : 0;
+    db.get().prepare('UPDATE users SET failed_logins = ?, locked_until = ? WHERE id = ?')
+      .run(lock ? 0 : failed, lock, user.id);
+    audit(req, lock ? 'user.locked' : 'user.login_failed', { userId: user.id });
+    throw generic;
+  }
+  db.get().prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(user.id);
+  return user;
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -180,6 +248,6 @@ const v = {
 
 module.exports = {
   HttpError, hashPassword, verifyPassword, DUMMY_HASH, passwordPolicyError,
-  createSession, revokeCurrentSession, destroySession, destroyAllSessions, loadSession,
-  requireAuth, requireAdmin, csrfProtect, audit, v, SESSION_COOKIE,
+  createSession, revokeCurrentSession, destroySession, destroyAllSessions, loadSession, checkPassword,
+  requireAuth, requireAdmin, requireAdminSession, csrfProtect, audit, v, SESSION_COOKIE, ADMIN_COOKIE,
 };

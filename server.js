@@ -81,6 +81,14 @@ function createApp() {
     companyName: config.companyName,
   }));
   api.use('/auth', require('./src/routes/auth'));
+  // Admin portal: sign-in and staff accounts, then the admin routers, which all need a portal session. They come
+  // before the shopping routers so a shopping sign-in check never answers an admin request.
+  const adminAuth = require('./src/routes/admin-auth');
+  api.use('/admin/auth', adminAuth.router);
+  api.use('/admin/staff', adminAuth.staff);
+  api.use('/admin', require('./src/routes/growth').admin);
+  api.use('/admin', require('./src/routes/admin-market'));
+  api.use('/admin', require('./src/routes/admin'));
   // Shared product links open without signing in, so this comes before the routers that require it.
   api.use('/share', require('./src/routes/reseller').share);
   // Plus, sales, referrals, ad clicks and preferences. Routes that need sign-in check it themselves.
@@ -93,9 +101,6 @@ function createApp() {
   api.use('/seller', require('./src/routes/seller'));
   api.use('/shop', require('./src/routes/shop'));
   api.use('/reseller', require('./src/routes/reseller').router);
-  api.use('/admin', growthRoutes.admin);
-  api.use('/admin', require('./src/routes/admin-market'));
-  api.use('/admin', require('./src/routes/admin'));
   api.use('/', require('./src/routes/shopping'));
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found.')));
 
@@ -114,6 +119,12 @@ function createApp() {
   }));
   // SPA fallback (hash routing, so only "/" really needs it).
   app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+  // The admin portal is its own page with its own sign-in.
+  app.get(['/admin', '/admin/'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  });
 
   // Central error handler: never leaks stack traces or SQL errors to clients.
   // eslint-disable-next-line no-unused-vars

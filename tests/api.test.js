@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const db = require('../src/db');
 const { seed } = require('../src/seed');
 const { createApp } = require('../server');
+const { signInAdmin } = require('./admin-signin');
 
 let server;
 let base;
@@ -41,7 +42,7 @@ function client() {
     if (data.csrfToken) csrf = data.csrfToken;
     return { status: res.status, data, headers: res.headers };
   };
-  return { call, get cookie() { return cookie; }, set csrf(v) { csrf = v; } };
+  return { call, get cookie() { return cookie; }, set cookie(v) { cookie = v; }, set csrf(v) { csrf = v; } };
 }
 
 let n = 0;
@@ -132,7 +133,7 @@ test('access control: auth required, admin only, no IDOR', async () => {
   assert.equal((await client().call('GET', '/cart')).status, 401);
   const a = await newCustomer();
   const b = await newCustomer();
-  assert.equal((await a.call('GET', '/admin/stats')).status, 403);
+  assert.equal((await a.call('GET', '/admin/stats')).status, 401, 'a shopping session never opens the admin portal');
 
   const addr = await withAddress(a);
   await a.call('POST', '/cart', { productId: 3, qty: 1 });
@@ -191,7 +192,7 @@ test('checkout: server computes price, coupon, shipping; card data not stored', 
 
 test('orders: cancel restocks; admin fulfilment; return window; verified review', async () => {
   const admin = client();
-  assert.equal((await admin.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' })).status, 200);
+  await signInAdmin(admin);
 
   const c = await newCustomer();
   const addressId = await withAddress(c);
@@ -224,7 +225,7 @@ test('orders: cancel restocks; admin fulfilment; return window; verified review'
 
 test('admin: product validation and soft delete', async () => {
   const admin = client();
-  await admin.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  await signInAdmin(admin);
   const bad = await admin.call('POST', '/admin/products', { title: 'Thing', brand: 'X', categoryId: 1, price: 200, mrp: 100, stock: 5 });
   assert.equal(bad.status, 400);
   const ok = await admin.call('POST', '/admin/products', { title: '<img src=x onerror=alert(1)>', brand: 'X', categoryId: 1, price: 100, mrp: 200, stock: 5 });
@@ -263,7 +264,7 @@ test('installable app: manifest, icons and service worker are served', async () 
 
 test('admin: product photos are validated, stored and shown on the product', async () => {
   const admin = client();
-  await admin.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  await signInAdmin(admin);
   // Smallest valid JPEG header followed by padding.
   const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]);
   const up = await admin.call('POST', '/admin/uploads', { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` });
@@ -275,7 +276,7 @@ test('admin: product photos are validated, stored and shown on the product', asy
   // Customers cannot upload.
   const c = client();
   await c.call('POST', '/auth/register', { name: 'Photo Test', email: 'photo@example.com', password: 'secret123' });
-  assert.equal((await c.call('POST', '/admin/uploads', { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` })).status, 403);
+  assert.equal((await c.call('POST', '/admin/uploads', { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` })).status, 401);
 
   const product = { title: 'Photo product', brand: 'X', categoryId: 1, price: 100, mrp: 200, stock: 5 };
   assert.equal((await admin.call('POST', '/admin/products', { ...product, image: 'javascript:alert(1)' })).status, 400);
