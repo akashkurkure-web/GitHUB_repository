@@ -80,3 +80,4 @@ data/
 # Vercel
 .vercel/
 .vercel-static/
+__pycache__/
