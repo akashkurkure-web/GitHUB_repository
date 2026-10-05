@@ -1,5 +1,9 @@
 'use strict';
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const express = require('express');
+const config = require('../config');
 const db = require('../db');
 const { loadOrder, restock } = require('./orders');
 const { HttpError, requireAdmin, audit, v } = require('../security');
@@ -20,6 +24,47 @@ router.get('/stats', (_req, res) => {
 });
 
 // ---------- Products ----------
+// A product photo is a link to an https image, a photo uploaded below, or (demo build only) an inline image.
+function readImage(val) {
+  if (val === undefined || val === null || val === '') return '';
+  if (typeof val !== 'string') throw new HttpError(400, 'Photo must be a link.');
+  const s = val.trim();
+  if (/^\/uploads\/products\/[a-z0-9-]+\.(jpg|png|webp)$/.test(s)) return s;
+  if (/^img\/products\/[a-z0-9-]+\.svg$/.test(s)) return s;
+  if (config.inlineImages && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s) && s.length < config.maxImageBytes * 1.4) return s;
+  let url;
+  try { url = new URL(s); } catch { throw new HttpError(400, 'Photo link is not a valid web address.'); }
+  if (url.protocol !== 'https:' || s.length > 1000) throw new HttpError(400, 'Photo link must start with https:// and be under 1,000 characters.');
+  return url.href;
+}
+
+const IMAGE_TYPES = [
+  { ext: 'jpg', mime: 'image/jpeg', test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { ext: 'png', mime: 'image/png', test: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+  { ext: 'webp', mime: 'image/webp', test: (b) => b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' },
+];
+
+// Upload a product photo (sent as a data URL). The file type is checked from its bytes, not its name.
+router.post('/uploads', (req, res) => {
+  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(typeof req.body.dataUrl === 'string' ? req.body.dataUrl : '');
+  if (!m) throw new HttpError(400, 'Please choose a JPG, PNG or WebP photo.');
+  const bytes = Buffer.from(m[1], 'base64');
+  if (bytes.length > config.maxImageBytes) throw new HttpError(413, 'Photo is too large. Please use one under 2 MB.');
+  const type = IMAGE_TYPES.find((t) => bytes.length > 12 && t.test(bytes));
+  if (!type) throw new HttpError(400, 'Please choose a JPG, PNG or WebP photo.');
+  let url;
+  if (config.inlineImages) {
+    url = `data:${type.mime};base64,${bytes.toString('base64')}`;
+  } else {
+    const dir = path.join(config.uploadDir, 'products');
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}.${type.ext}`;
+    fs.writeFileSync(path.join(dir, name), bytes);
+    url = `/uploads/products/${name}`;
+  }
+  audit(req, 'admin.photo_upload', { bytes: bytes.length });
+  res.status(201).json({ url });
+});
 function readProduct(body) {
   const price = v.int(body.price, 'Price (₹)', { min: 1, max: 10_000_000 });
   const mrp = v.int(body.mrp, 'MRP (₹)', { min: 1, max: 10_000_000 });
@@ -38,6 +83,7 @@ function readProduct(body) {
     stock: v.int(body.stock, 'Stock', { min: 0, max: 1_000_000 }),
     emoji: v.str(body.emoji, 'Icon', { max: 8, optional: true }) || '📦',
     color: v.str(body.color, 'Colour', { pattern: /^#[0-9a-fA-F]{6}$/, optional: true }) || '#e3e6e6',
+    image: readImage(body.image),
     express: body.express ? 1 : 0,
     is_deal: body.isDeal ? 1 : 0,
     active: body.active === false ? 0 : 1,
@@ -57,8 +103,8 @@ router.get('/products', (req, res) => {
 router.post('/products', (req, res) => {
   const p = readProduct(req.body);
   const id = Number(db.get().prepare(`INSERT INTO products (title, brand, category_id, description, features, price, mrp, stock,
-      emoji, color, express, is_deal, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.express,
+      emoji, color, image, express, is_deal, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.express,
       p.is_deal, p.active, Date.now()).lastInsertRowid);
   audit(req, 'admin.product_create', { productId: id });
   res.status(201).json({ id });
@@ -68,8 +114,8 @@ router.put('/products/:id', (req, res) => {
   const id = v.int(req.params.id, 'Product', { min: 1 });
   const p = readProduct(req.body);
   const r = db.get().prepare(`UPDATE products SET title=?, brand=?, category_id=?, description=?, features=?, price=?, mrp=?,
-      stock=?, emoji=?, color=?, express=?, is_deal=?, active=? WHERE id = ?`)
-    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.express,
+      stock=?, emoji=?, color=?, image=?, express=?, is_deal=?, active=? WHERE id = ?`)
+    .run(p.title, p.brand, p.category_id, p.description, p.features, p.price, p.mrp, p.stock, p.emoji, p.color, p.image, p.express,
       p.is_deal, p.active, id);
   if (!r.changes) throw new HttpError(404, 'Product not found.');
   audit(req, 'admin.product_update', { productId: id });

@@ -109,13 +109,17 @@ router.post('/orders', (req, res) => {
   res.status(201).json(result);
 });
 
+// Line items keep the title and price from the time of purchase; the photo comes from the current product.
+const ITEMS_SQL = `SELECT oi.product_id, oi.title, oi.emoji, oi.price, oi.qty, COALESCE(p.image, '') AS image
+  FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?`;
+
 function loadOrder(userId, id, isAdmin = false) {
   const o = isAdmin
     ? db.get().prepare('SELECT * FROM orders WHERE id = ?').get(id)
     : db.get().prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?').get(id, userId);
   if (!o) throw new HttpError(404, 'Order not found.');
   o.address = JSON.parse(o.address);
-  o.items = db.get().prepare('SELECT product_id, title, emoji, price, qty FROM order_items WHERE order_id = ?').all(id);
+  o.items = db.get().prepare(ITEMS_SQL).all(id);
   delete o.idempotency_key;
   return o;
 }
@@ -125,7 +129,7 @@ router.get('/orders', (req, res) => {
     `SELECT id, order_no, status, total, payment_method, payment_status, created_at, delivered_at
        FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 100`
   ).all(req.user.id);
-  const items = db.get().prepare('SELECT product_id, title, emoji, price, qty FROM order_items WHERE order_id = ?');
+  const items = db.get().prepare(ITEMS_SQL);
   for (const o of orders) o.items = items.all(o.id);
   res.json({ orders });
 });

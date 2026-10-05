@@ -1,5 +1,4 @@
 'use strict';
-const crypto = require('node:crypto');
 const db = require('./db');
 const config = require('./config');
 const { hashPassword } = require('./security');
@@ -68,6 +67,49 @@ const COUPONS = [
 const DESCRIPTION = (title, brand) =>
   `${title} by ${brand}. Sold and fulfilled by ${config.storeName}. Covered by our ${config.returnWindowDays}-day easy return policy and 100% purchase protection.`;
 
+// Drawn by scripts/draw-products.js, in the same order as PRODUCTS.
+const PICTURES = [
+  'nova-x5',
+  'pixelon-9-pro',
+  'volt-lite',
+  'fast-charger-65w',
+  'airbeat-pro',
+  'ultrabook-14',
+  'fitora-watch-3',
+  'visionex-43-tv',
+  'boombox-speaker',
+  'optiq-camera',
+  'urbanthread-shirt',
+  'desi-weaves-kurta',
+  'stride-running-shoes',
+  'suncraft-aviators',
+  'hideworks-wallet',
+  'chefnest-cookware',
+  'hydrasteel-bottles',
+  'sleepwell-bedsheet',
+  'lumio-desk-lamp',
+  'atomic-discipline',
+  'indian-kitchen-book',
+  'coding-interview-book',
+  'glowlab-vitamin-c',
+  'velvet-muse-lipstick',
+  'groomsmith-kit',
+  'boundary-cricket-bat',
+  'asana-yoga-mat',
+  'ironcore-dumbbells',
+  'bricktown-blocks',
+  'turbotoys-rc-car',
+  'funfamily-board-game',
+  'royal-harvest-basmati',
+  'farm-pure-groundnut-oil',
+  'tea-valley-assam',
+  'kitchenpro-mixer',
+  'coolbreeze-split-ac',
+  'washmate-front-load',
+  'crispair-air-fryer',
+];
+const pictureOf = (i) => (PICTURES[i] ? `img/products/${PICTURES[i]}.svg` : '');
+
 function seed({ reset = false, log = console.log } = {}) {
   const d = db.get();
   if (reset) {
@@ -76,35 +118,42 @@ function seed({ reset = false, log = console.log } = {}) {
             DELETE FROM audit_log; DELETE FROM users;`);
   }
   const already = d.prepare('SELECT COUNT(*) AS n FROM products').get().n;
-  if (already > 0) return;
+  if (already > 0) {
+    // Older stores were seeded before pictures existed: fill in only products that still have none.
+    if (d.prepare("SELECT 1 FROM products WHERE image = '' LIMIT 1").get()) {
+      const fill = d.prepare("UPDATE products SET image = ? WHERE title = ? AND image = ''");
+      PRODUCTS.forEach((row, i) => fill.run(pictureOf(i), row[1]));
+    }
+    return;
+  }
 
   const now = Date.now();
   db.tx(() => {
+    // Re-check inside the transaction: two servers starting together must not both seed a shared database.
+    if (d.prepare('SELECT COUNT(*) AS n FROM products').get().n > 0) return;
     const insCat = d.prepare('INSERT INTO categories (slug, name, icon) VALUES (?,?,?)');
     for (const c of CATEGORIES) insCat.run(...c);
     const catId = Object.fromEntries(d.prepare('SELECT slug, id FROM categories').all().map((r) => [r.slug, r.id]));
 
     const insProd = d.prepare(`INSERT INTO products (title, brand, category_id, description, features, price, mrp, stock,
-      rating_avg, rating_count, sold_count, emoji, color, express, is_deal, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      rating_avg, rating_count, sold_count, emoji, color, image, express, is_deal, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     PRODUCTS.forEach(([cat, title, brand, price, mrp, stock, emoji, color, express, deal, features], i) => {
       // Deterministic pseudo-random "marketplace history" so listings look realistic.
       const rc = 40 + ((i * 97) % 4000);
       const ra = Math.round((3.6 + ((i * 37) % 14) / 10) * 10) / 10;
       insProd.run(title, brand, catId[cat], DESCRIPTION(title, brand), JSON.stringify(features), price * 100, mrp * 100,
-        stock, Math.min(ra, 4.9), rc, rc * 3, emoji, color, express, deal, now - i * 3600_000);
+        stock, Math.min(ra, 4.9), rc, rc * 3, emoji, color, pictureOf(i), express, deal, now - i * 3600_000);
     });
 
     const insCoupon = d.prepare('INSERT INTO coupons (code, kind, value, max_discount, min_order, description) VALUES (?,?,?,?,?,?)');
     for (const c of COUPONS) insCoupon.run(...c);
 
-    let adminPassword = config.adminPassword;
-    if (!adminPassword) {
-      adminPassword = crypto.randomBytes(9).toString('base64url') + '9a';
-      log(`\n[seed] Admin account created: ${config.adminEmail}  password: ${adminPassword}\n` +
-          '[seed] Set ADMIN_EMAIL / ADMIN_PASSWORD env vars to choose your own. This password is shown only once.\n');
+    // With ADMIN_PASSWORD set, the owner account is created up front. Without it, the store opens with
+    // no owner and the first visit to Sign in asks the owner to create their account (POST /api/auth/setup).
+    if (config.adminPassword) {
+      d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
+        .run('Store Admin', config.adminEmail, hashPassword(config.adminPassword), 'admin', now);
     }
-    d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
-      .run('Store Admin', config.adminEmail, hashPassword(adminPassword), 'admin', now);
   });
 }
 

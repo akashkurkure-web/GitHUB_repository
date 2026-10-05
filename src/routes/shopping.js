@@ -12,7 +12,7 @@ router.use(requireAuth);
 function cartView(userId, coupon) {
   const q = quote(userId, coupon);
   const saved = db.get().prepare(
-    `SELECT c.product_id, c.qty, p.title, p.price, p.mrp, p.stock, p.emoji, p.color
+    `SELECT c.product_id, c.qty, p.title, p.price, p.mrp, p.stock, p.emoji, p.color, p.image
        FROM cart_items c JOIN products p ON p.id = c.product_id
       WHERE c.user_id = ? AND c.saved_for_later = 1 ORDER BY c.added_at DESC`
   ).all(userId);
@@ -90,7 +90,7 @@ router.post('/cart/coupon', (req, res) => {
 // ---------------- Wishlist ----------------
 router.get('/wishlist', (req, res) => {
   const items = db.get().prepare(
-    `SELECT p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.emoji, p.color, p.express
+    `SELECT p.id, p.title, p.brand, p.price, p.mrp, p.stock, p.rating_avg, p.rating_count, p.emoji, p.color, p.image, p.express
        FROM wishlist w JOIN products p ON p.id = w.product_id WHERE w.user_id = ? AND p.active = 1 ORDER BY w.added_at DESC`
   ).all(req.user.id);
   res.json({ items });

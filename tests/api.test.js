@@ -2,6 +2,7 @@
 process.env.NODE_ENV = 'test';
 process.env.DB_FILE = ':memory:';
 process.env.ADMIN_PASSWORD = 'AdminPass123';
+process.env.UPLOAD_DIR = require('node:path').join(require('node:os').tmpdir(), 'bazaario-test-uploads');
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -255,4 +256,28 @@ test('installable app: manifest, icons and service worker are served', async () 
   assert.equal(sw.status, 200);
   assert.equal(sw.headers.get('cache-control'), 'no-cache');
   assert.equal((await fetch(`${root}/offline.html`)).status, 200);
+});
+
+test('admin: product photos are validated, stored and shown on the product', async () => {
+  const admin = client();
+  await admin.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  // Smallest valid JPEG header followed by padding.
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]);
+  const up = await admin.call('POST', '/admin/uploads', { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` });
+  assert.equal(up.status, 201);
+  assert.match(up.data.url, /^\/uploads\/products\/[a-z0-9-]+\.jpg$/);
+  // A file that only claims to be an image is refused.
+  const fake = await admin.call('POST', '/admin/uploads', { dataUrl: `data:image/png;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}` });
+  assert.equal(fake.status, 400);
+  // Customers cannot upload.
+  const c = client();
+  await c.call('POST', '/auth/register', { name: 'Photo Test', email: 'photo@example.com', password: 'secret123' });
+  assert.equal((await c.call('POST', '/admin/uploads', { dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` })).status, 403);
+
+  const product = { title: 'Photo product', brand: 'X', categoryId: 1, price: 100, mrp: 200, stock: 5 };
+  assert.equal((await admin.call('POST', '/admin/products', { ...product, image: 'javascript:alert(1)' })).status, 400);
+  assert.equal((await admin.call('POST', '/admin/products', { ...product, image: 'http://example.com/a.jpg' })).status, 400);
+  const made = await admin.call('POST', '/admin/products', { ...product, image: up.data.url });
+  assert.equal(made.status, 201);
+  assert.equal((await client().call('GET', `/products/${made.data.id}`)).data.product.image, up.data.url);
 });
