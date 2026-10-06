@@ -84,19 +84,8 @@ body.adm { background: var(--paper); min-height: 100vh; }
 .adm-gate-brand b { display: block; font-size: 17px; line-height: 1.1; }
 .adm-gate-brand small { display: block; color: var(--ink-soft); font-size: 12px; }
 .adm-gate-foot { margin-top: 16px; font-size: 13px; }
-.adm-steps { display: flex; gap: 6px; margin-bottom: 8px; }
-.adm-steps span { flex: 1; font-size: 11px; font-weight: 600; color: var(--ink-soft); border-top: 3px solid var(--line); padding-top: 6px; }
-.adm-steps span.on { color: var(--teal); border-top-color: var(--teal); }
-.adm-steps span.done { color: var(--leaf); border-top-color: #9CCBAE; }
-.adm-enrol { padding-left: 20px; margin: 14px 0 0; }
-.adm-enrol > li { margin-bottom: 14px; }
-.adm-enrol > li > b { display: block; margin-bottom: 2px; }
-.adm-enrol .hint { display: block; }
 .adm-qr { display: flex; gap: 14px; align-items: center; margin-top: 8px; }
 .adm-qr img { flex: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: #fff; }
-.adm-block { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-card); padding: 12px 14px; margin: 10px 0 4px; }
-.adm-block h3 { margin: 0 0 2px; }
-.adm-ack { margin-top: 14px !important; }
 
 /* ---------- Idle warning ---------- */
 .adm-idle { max-width: 380px; }

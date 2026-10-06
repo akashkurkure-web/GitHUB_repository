@@ -1,5 +1,5 @@
 'use strict';
-// Admin portal: two-step sign-in with an authenticator code, staff roles, staff accounts and the idle sign-out.
+// Admin portal: email and password sign-in, the optional authenticator code, staff roles and accounts, idle sign-out.
 process.env.NODE_ENV = 'test';
 process.env.DB_FILE = ':memory:';
 process.env.ADMIN_PASSWORD = 'AdminPass123';
@@ -47,68 +47,94 @@ function client() {
 
 const secrets = new Map();
 
+/** Signs in to the portal: email and password, plus the new password or the app code when those are needed. */
 async function signIn(c, email, password, { newPassword } = {}) {
   const r = await c.call('POST', '/admin/auth/login', { email, password });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  if (r.data.enrol) secrets.set(email, r.data.enrol.secret.replace(/\s/g, ''));
+  if (r.data.user) return r.data;
   // A code works only once; these tests sign in faster than a new code appears, so act as if 30 seconds passed.
   db.get().prepare('UPDATE users SET totp_last_step = 0 WHERE email = ?').run(email);
-  const ok = await c.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code: totp.codeAt(secrets.get(email), totp.stepAt()), newPassword });
+  const code = r.data.twoStep ? totp.codeAt(secrets.get(email), totp.stepAt()) : undefined;
+  const ok = await c.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code, newPassword });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   return ok.data;
 }
 
-test('sign-in: password then authenticator code; codes work once; recovery codes', async () => {
+/** Turns on the optional authenticator code from My account and returns the recovery codes. */
+async function turnOnCode(c, email, password) {
+  const start = await c.call('POST', '/admin/auth/authenticator', { password });
+  assert.equal(start.status, 200);
+  assert.match(start.data.enrol.uri, /^otpauth:\/\/totp\/Bazaario%20Admin%3A[^?]+\?secret=[A-Z2-7]+/);
+  const secret = start.data.enrol.secret.replace(/\s/g, '');
+  assert.equal((await c.call('POST', '/admin/auth/authenticator/confirm', { challenge: start.data.challenge, code: '000000' })).status, 400);
+  const ok = await c.call('POST', '/admin/auth/authenticator/confirm', { challenge: start.data.challenge, code: totp.codeAt(secret, totp.stepAt()) });
+  assert.equal(ok.status, 200);
+  secrets.set(email, secret);
+  return ok.data.recoveryCodes;
+}
+
+test('sign-in: email and password on one screen; a shopping session never opens the portal', async () => {
   const c = client();
-  // Wrong password and shopper accounts get no challenge.
   assert.equal((await c.call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'nope12345' })).status, 401);
   const shopper = client();
   assert.equal((await shopper.call('POST', '/auth/register', { name: 'Shopper', email: 'buyer@x.in', password: 'buyer1234' })).status, 201);
   assert.equal((await shopper.call('POST', '/admin/auth/login', { email: 'buyer@x.in', password: 'buyer1234' })).status, 403);
-  assert.equal((await shopper.call('GET', '/admin/stats')).status, 401, 'a shopping session never opens the portal');
+  assert.equal((await shopper.call('GET', '/admin/stats')).status, 401);
 
-  const r = await c.call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
-  assert.equal(r.status, 200);
-  assert.match(r.data.enrol.uri, /^otpauth:\/\/totp\/Bazaario%20Admin%3Aadmin%40bazaario\.local\?secret=[A-Z2-7]+/);
-  const secret = r.data.enrol.secret.replace(/\s/g, '');
-  secrets.set('admin@bazaario.local', secret);
-  assert.equal((await c.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code: '000000' })).status, 401);
-  assert.equal((await c.call('POST', '/admin/auth/verify', { challenge: 'made-up', code: totp.codeAt(secret, totp.stepAt()) })).status, 401);
-  const step = totp.stepAt();
-  const ok = await c.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code: totp.codeAt(secret, step) });
+  const ok = await c.call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
   assert.equal(ok.status, 200);
-  assert.equal(ok.data.user.staffRole, 'owner');
-  assert.equal(ok.data.recoveryCodes.length, 10);
+  assert.equal(ok.data.user.staffRole, 'owner', 'signed in straight away');
   assert.ok(c.jar.has('aid') && !c.jar.has('sid'), 'the portal has its own cookie');
   assert.match(ok.headers.get('set-cookie'), /Path=\/api\/admin;.*HttpOnly.*SameSite=Strict/i);
   assert.equal((await c.call('GET', '/admin/stats')).status, 200);
   assert.equal((await c.call('GET', '/admin/auth/me')).data.user.sections.length, 21);
+  assert.equal((await c.call('GET', '/admin/auth/security')).data.twoStep, false);
 
-  // The same code cannot be used again, even with the right password.
-  const again = client();
-  const r2 = await again.call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
-  assert.equal(r2.data.enrol, null, 'the app is set up once');
-  assert.equal((await again.call('POST', '/admin/auth/verify', { challenge: r2.data.challenge, code: totp.codeAt(secret, step) })).status, 401);
-  // A recovery code works once.
-  const rc = ok.data.recoveryCodes[0];
-  const viaRecovery = await again.call('POST', '/admin/auth/verify', { challenge: r2.data.challenge, code: rc.toLowerCase() });
-  assert.equal(viaRecovery.status, 200);
-  assert.equal(viaRecovery.data.recoveryCodesLeft, 9);
-  const r3 = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
-  assert.equal((await client().call('POST', '/admin/auth/verify', { challenge: r3.data.challenge, code: rc })).status, 401);
-
-  // Five wrong codes end the challenge.
-  const r4 = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
-  const w = client();
-  for (let i = 0; i < 4; i++) assert.equal((await w.call('POST', '/admin/auth/verify', { challenge: r4.data.challenge, code: '111111' })).status, 401);
-  const last = await w.call('POST', '/admin/auth/verify', { challenge: r4.data.challenge, code: '111111' });
-  assert.match(last.data.error, /Too many wrong codes/);
-
-  // Sign out ends the portal session only.
   assert.equal((await c.call('POST', '/admin/auth/logout')).status, 200);
   assert.equal((await c.call('GET', '/admin/stats')).status, 401);
   const audit = db.get().prepare("SELECT action FROM audit_log WHERE action LIKE 'admin.%'").all().map((a) => a.action);
-  for (const a of ['admin.2fa_enrolled', 'admin.login', 'admin.code_failed', 'admin.logout']) assert.ok(audit.includes(a), a);
+  for (const a of ['admin.login', 'admin.logout']) assert.ok(audit.includes(a), a);
+});
+
+test('optional authenticator code: on from My account, codes work once, recovery codes, off again', async () => {
+  const c = client();
+  await signIn(c, 'admin@bazaario.local', 'AdminPass123');
+  assert.equal((await c.call('POST', '/admin/auth/authenticator', { password: 'wrong' })).status, 400);
+  const recovery = await turnOnCode(c, 'admin@bazaario.local', 'AdminPass123');
+  assert.equal(recovery.length, 10);
+  const secret = secrets.get('admin@bazaario.local');
+
+  // Now the password alone gives only a challenge.
+  const r = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  assert.equal(r.data.twoStep, true);
+  assert.equal(r.data.user, undefined);
+  const w = client();
+  assert.equal((await w.call('POST', '/admin/auth/verify', { challenge: r.data.challenge })).status, 401, 'code needed');
+  const step = totp.stepAt() + 1;
+  assert.equal((await w.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code: totp.codeAt(secret, step) })).status, 200);
+  // The same code cannot be used again; a recovery code works once.
+  const r2 = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  const again = client();
+  assert.equal((await again.call('POST', '/admin/auth/verify', { challenge: r2.data.challenge, code: totp.codeAt(secret, step) })).status, 401);
+  const viaRecovery = await again.call('POST', '/admin/auth/verify', { challenge: r2.data.challenge, code: recovery[0].toLowerCase() });
+  assert.equal(viaRecovery.status, 200);
+  assert.equal(viaRecovery.data.recoveryCodesLeft, 9);
+  const r3 = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  assert.equal((await client().call('POST', '/admin/auth/verify', { challenge: r3.data.challenge, code: recovery[0] })).status, 401);
+  // Five wrong codes end the challenge.
+  const r4 = await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' });
+  for (let i = 0; i < 4; i++) assert.equal((await client().call('POST', '/admin/auth/verify', { challenge: r4.data.challenge, code: '111111' })).status, 401);
+  assert.match((await client().call('POST', '/admin/auth/verify', { challenge: r4.data.challenge, code: '111111' })).data.error, /Too many wrong codes/);
+
+  // Renew recovery codes, then turn the code off: sign-in is the password alone again.
+  db.get().prepare("UPDATE users SET totp_last_step = 0 WHERE email = 'admin@bazaario.local'").run();
+  const renew = await c.call('POST', '/admin/auth/recovery-codes', { code: totp.codeAt(secret, totp.stepAt()) });
+  assert.equal(renew.data.recoveryCodes.length, 10);
+  assert.equal((await c.call('POST', '/admin/auth/authenticator/off', { password: 'wrong' })).status, 400);
+  assert.equal((await c.call('POST', '/admin/auth/authenticator/off', { password: 'AdminPass123' })).status, 200);
+  assert.ok((await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' })).data.user);
+  const audit = db.get().prepare("SELECT action FROM audit_log WHERE action LIKE 'admin.2fa%' OR action = 'admin.code_failed'").all().map((a) => a.action);
+  for (const a of ['admin.2fa_on', 'admin.2fa_off', 'admin.code_failed']) assert.ok(audit.includes(a), a);
 });
 
 test('idle sign-out: 30 minutes without activity ends the portal session', async () => {
@@ -134,15 +160,13 @@ test('staff: owner adds a manager and a support agent; roles limit what they can
   const s = await owner.call('POST', '/admin/staff', { name: 'Ravi Support', email: 'ravi@shop.in', staffRole: 'support' });
   assert.equal(s.status, 201);
 
-  // First sign-in: the temporary password must be replaced, and the app set up.
+  // First sign-in: the temporary password must be replaced.
   const mc = client();
   const r = await mc.call('POST', '/admin/auth/login', { email: 'neha@shop.in', password: m.data.tempPassword });
   assert.equal(r.data.mustChangePassword, true);
-  secrets.set('neha@shop.in', r.data.enrol.secret.replace(/\s/g, ''));
-  const code = totp.codeAt(secrets.get('neha@shop.in'), totp.stepAt());
-  assert.equal((await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code })).status, 400, 'new password needed');
-  assert.equal((await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code, newPassword: m.data.tempPassword })).status, 400);
-  const done = await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code, newPassword: 'nehapass12' });
+  assert.equal((await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge })).status, 400, 'new password needed');
+  assert.equal((await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, newPassword: m.data.tempPassword })).status, 400);
+  const done = await mc.call('POST', '/admin/auth/verify', { challenge: r.data.challenge, newPassword: 'nehapass12' });
   assert.equal(done.status, 200);
   assert.equal(done.data.user.staffRole, 'manager');
   assert.ok(!done.data.user.sections.some((x) => ['staff', 'audit'].includes(x.key)));
@@ -154,6 +178,7 @@ test('staff: owner adds a manager and a support agent; roles limit what they can
 
   const sc = client();
   await signIn(sc, 'ravi@shop.in', s.data.tempPassword, { newPassword: 'ravipass12' });
+  await turnOnCode(sc, 'ravi@shop.in', 'ravipass12');
   assert.equal((await sc.call('GET', '/admin/orders')).status, 200);
   assert.equal((await sc.call('GET', '/admin/tickets')).status, 200);
   assert.equal((await sc.call('GET', '/admin/returns')).status, 200);
@@ -174,12 +199,12 @@ test('staff: owner adds a manager and a support agent; roles limit what they can
   assert.equal((await owner.call('PATCH', `/admin/staff/${ravi.id}`, { staffRole: 'manager' })).status, 200);
   assert.equal((await sc.call('GET', '/admin/products')).status, 200);
 
-  // Reset: signed out everywhere, new temporary password, app set up again.
+  // Reset: signed out everywhere, new temporary password, authenticator code off.
   const reset = await owner.call('POST', `/admin/staff/${ravi.id}/reset`);
   assert.equal(reset.status, 200);
   assert.equal((await sc.call('GET', '/admin/orders')).status, 401);
   const rr = await client().call('POST', '/admin/auth/login', { email: 'ravi@shop.in', password: reset.data.tempPassword });
-  assert.ok(rr.data.enrol && rr.data.mustChangePassword);
+  assert.ok(rr.data.mustChangePassword && !rr.data.twoStep);
 
   // Remove: the account stays as a shopping account and cannot open the portal.
   assert.equal((await owner.call('DELETE', `/admin/staff/${ravi.id}`)).status, 200);
@@ -188,27 +213,20 @@ test('staff: owner adds a manager and a support agent; roles limit what they can
   assert.equal((await mc.call('GET', '/admin/staff')).status, 403);
 });
 
-test('my account: change password and renew recovery codes', async () => {
+test('my account: change password; move the code to a new phone', async () => {
   const c = client();
   await signIn(c, 'neha@shop.in', 'nehapass12');
-  assert.equal((await c.call('GET', '/admin/auth/security')).data.recoveryCodesLeft, 10);
   assert.equal((await c.call('POST', '/admin/auth/password', { currentPassword: 'wrong', newPassword: 'nehapass34' })).status, 400);
   assert.equal((await c.call('POST', '/admin/auth/password', { currentPassword: 'nehapass12', newPassword: 'nehapass34' })).status, 200);
   assert.equal((await c.call('GET', '/admin/stats')).status, 200, 'this session continues');
-  assert.equal((await c.call('POST', '/admin/auth/recovery-codes', { code: '123456' })).status, 400);
-  db.get().prepare("UPDATE users SET totp_last_step = 0 WHERE email = 'neha@shop.in'").run();
-  const renew = await c.call('POST', '/admin/auth/recovery-codes', { code: totp.codeAt(secrets.get('neha@shop.in'), totp.stepAt()) });
-  assert.equal(renew.status, 200);
-  assert.equal(renew.data.recoveryCodes.length, 10);
 
-  // Moving to a new phone: password, then a code from the new app; the old app stops working.
-  assert.equal((await c.call('POST', '/admin/auth/authenticator', { password: 'wrong' })).status, 400);
-  const move = await c.call('POST', '/admin/auth/authenticator', { password: 'nehapass34' });
-  assert.equal(move.status, 200);
-  const fresh = move.data.enrol.secret.replace(/\s/g, '');
-  assert.equal((await c.call('POST', '/admin/auth/authenticator/confirm', { challenge: move.data.challenge, code: totp.codeAt(secrets.get('neha@shop.in'), totp.stepAt()) })).status, 400);
-  assert.equal((await c.call('POST', '/admin/auth/authenticator/confirm', { challenge: move.data.challenge, code: totp.codeAt(fresh, totp.stepAt()) })).status, 200);
+  await turnOnCode(c, 'neha@shop.in', 'nehapass34');
   const old = secrets.get('neha@shop.in');
+  const move = await c.call('POST', '/admin/auth/authenticator', { password: 'nehapass34' });
+  const fresh = move.data.enrol.secret.replace(/\s/g, '');
+  const moved = await c.call('POST', '/admin/auth/authenticator/confirm', { challenge: move.data.challenge, code: totp.codeAt(fresh, totp.stepAt()) });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.data.recoveryCodes, undefined, 'moving keeps the recovery codes');
   secrets.set('neha@shop.in', fresh);
   const r = await client().call('POST', '/admin/auth/login', { email: 'neha@shop.in', password: 'nehapass34' });
   db.get().prepare("UPDATE users SET totp_last_step = 0 WHERE email = 'neha@shop.in'").run();

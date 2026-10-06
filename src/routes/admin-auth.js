@@ -2,9 +2,10 @@
 /**
  * Admin portal sign-in and staff accounts.
  *
- * Signing in takes two steps. The email and password give a short-lived challenge; the 6-digit code from the
- * person's authenticator app (or one of their recovery codes) turns it into an admin session. The first time,
- * the challenge carries a QR code to add Bazaario to the app, and new staff choose their own password.
+ * Signing in is the email and password on one screen. Two steps are needed only when the person has to choose
+ * their own password (new staff) or has turned on the optional authenticator code under My account; then the
+ * password gives a short-lived challenge, and the new password or the 6-digit code (or a recovery code)
+ * finishes the sign-in.
  */
 const crypto = require('node:crypto');
 const express = require('express');
@@ -53,10 +54,10 @@ function newRecoveryCodes() {
 /** A temporary password for new staff: 12 letters and numbers, changed at first sign-in. */
 const tempPassword = () => `${totp.base32Encode(crypto.randomBytes(6)).slice(0, 4)}-${crypto.randomInt(1000, 10000)}-${totp.base32Encode(crypto.randomBytes(6)).slice(0, 4).toLowerCase()}`;
 
-/** Starts step 2 of signing in. A person without an authenticator app yet gets a new secret and its QR code. */
-async function challengeFor(user) {
+/** Starts step 2 of signing in, or (with enrol) adding an authenticator app, which gets a new secret and QR code. */
+async function challengeFor(user, { enrol: withApp = false } = {}) {
   const token = crypto.randomBytes(32).toString('base64url');
-  const pending = user.totp_secret ? null : totp.newSecret();
+  const pending = withApp ? totp.newSecret() : null;
   db.tx((d) => {
     d.prepare('DELETE FROM admin_challenges WHERE user_id = ? OR expires_at < ?').run(user.id, Date.now());
     d.prepare('INSERT INTO admin_challenges (token_hash, user_id, pending_secret, attempts, expires_at) VALUES (?,?,?,0,?)')
@@ -68,7 +69,17 @@ async function challengeFor(user) {
     const svg = await QRCode.toString(uri, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#14211f', light: '#ffffff' } });
     enrol = { secret: pending.replace(/(.{4})/g, '$1 ').trim(), qr: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, uri };
   }
-  return { challenge: token, enrol, mustChangePassword: !!user.must_change_password, name: user.name };
+  return { challenge: token, enrol, mustChangePassword: !!user.must_change_password, twoStep: !!user.totp_secret, name: user.name };
+}
+
+/** Opens a portal session for a person whose sign-in is complete. */
+function openSession(req, res, user, how) {
+  db.get().prepare('UPDATE users SET last_admin_login = ? WHERE id = ?').run(Date.now(), user.id);
+  revokeCurrentSession(req);
+  const csrfToken = createSession(res, req, user.id, { admin: true });
+  req.user = user;
+  audit(req, 'admin.login', { with: how });
+  return { user: portalUser(user), csrfToken, idleMinutes: config.adminIdleMs / 60000 };
 }
 
 router.get('/me', (req, res) => {
@@ -100,7 +111,7 @@ router.post('/setup', limiter, async (req, res) => {
   });
   req.user = user;
   audit(req, 'owner.setup');
-  res.status(201).json(await challengeFor(user));
+  res.status(201).json(openSession(req, res, user, 'password'));
 });
 
 router.post('/login', limiter, async (req, res) => {
@@ -108,7 +119,8 @@ router.post('/login', limiter, async (req, res) => {
   if (user.role !== 'admin') {
     throw new HttpError(403, 'This is a shopping account, not a staff account. Shoppers sign in on the store.');
   }
-  res.json(await challengeFor(user));
+  if (user.must_change_password || user.totp_secret) return res.json(await challengeFor(user));
+  res.json(openSession(req, res, user, 'password'));
 });
 
 router.post('/verify', limiter, (req, res) => {
@@ -116,7 +128,7 @@ router.post('/verify', limiter, (req, res) => {
   const code = typeof req.body.code === 'string' ? req.body.code.trim().replace(/\s/g, '') : '';
   const restart = new HttpError(401, 'Your sign-in has timed out. Please enter your email and password again.');
   const ch = token && token.length < 100 ? db.get().prepare('SELECT * FROM admin_challenges WHERE token_hash = ?').get(sha256(token)) : null;
-  if (!ch || ch.expires_at < Date.now()) throw restart;
+  if (!ch || ch.pending_secret || ch.expires_at < Date.now()) throw restart;
   const user = db.get().prepare('SELECT * FROM users WHERE id = ?').get(ch.user_id);
   if (!user || user.role !== 'admin') throw restart;
   if (user.locked_until > Date.now()) throw new HttpError(423, 'This account is temporarily locked after too many failed attempts. Try again later.');
@@ -130,54 +142,43 @@ router.post('/verify', limiter, (req, res) => {
     newHash = hashPassword(req.body.newPassword);
   }
 
-  const enrolling = !!ch.pending_secret;
+  // The authenticator code, when the person has turned it on.
   let step = -1;
   let usedRecovery = null;
-  if (/^\d{6}$/.test(code)) {
-    step = totp.verify(enrolling ? ch.pending_secret : user.totp_secret, code, enrolling ? 0 : user.totp_last_step);
-  } else if (!enrolling && /^[a-z2-7]{4}-?[a-z2-7]{4}$/i.test(code)) {
-    const h = sha256(code.toUpperCase().replace('-', ''));
-    const hashes = JSON.parse(user.recovery_codes || '[]');
-    usedRecovery = hashes.find((x) => crypto.timingSafeEqual(Buffer.from(x), Buffer.from(h))) || null;
-  }
-  if (step < 0 && !usedRecovery) {
-    const attempts = ch.attempts + 1;
-    if (attempts >= MAX_CODE_ATTEMPTS) {
-      db.get().prepare('DELETE FROM admin_challenges WHERE token_hash = ?').run(ch.token_hash);
-      audit(req, 'admin.code_failed', { userId: user.id, final: true });
-      throw new HttpError(401, 'Too many wrong codes. Please enter your email and password again.');
+  if (user.totp_secret) {
+    if (/^\d{6}$/.test(code)) {
+      step = totp.verify(user.totp_secret, code, user.totp_last_step);
+    } else if (/^[a-z2-7]{4}-?[a-z2-7]{4}$/i.test(code)) {
+      const h = sha256(code.toUpperCase().replace('-', ''));
+      const hashes = JSON.parse(user.recovery_codes || '[]');
+      usedRecovery = hashes.find((x) => crypto.timingSafeEqual(Buffer.from(x), Buffer.from(h))) || null;
     }
-    db.get().prepare('UPDATE admin_challenges SET attempts = ? WHERE token_hash = ?').run(attempts, ch.token_hash);
-    audit(req, 'admin.code_failed', { userId: user.id });
-    throw new HttpError(401, enrolling
-      ? 'That code is not right. Scan the QR code again, then enter the 6-digit code your app shows now.'
-      : 'That code is not right. Enter the 6-digit code your authenticator app shows now, or a recovery code.');
+    if (step < 0 && !usedRecovery) {
+      const attempts = ch.attempts + 1;
+      if (attempts >= MAX_CODE_ATTEMPTS) {
+        db.get().prepare('DELETE FROM admin_challenges WHERE token_hash = ?').run(ch.token_hash);
+        audit(req, 'admin.code_failed', { userId: user.id, final: true });
+        throw new HttpError(401, 'Too many wrong codes. Please enter your email and password again.');
+      }
+      db.get().prepare('UPDATE admin_challenges SET attempts = ? WHERE token_hash = ?').run(attempts, ch.token_hash);
+      audit(req, 'admin.code_failed', { userId: user.id });
+      throw new HttpError(401, 'That code is not right. Enter the 6-digit code your authenticator app shows now, or a recovery code.');
+    }
   }
 
-  const recovery = enrolling ? newRecoveryCodes() : null;
   db.tx((d) => {
     d.prepare('DELETE FROM admin_challenges WHERE token_hash = ?').run(ch.token_hash);
-    if (enrolling) d.prepare('UPDATE users SET totp_secret = ?, recovery_codes = ? WHERE id = ?').run(ch.pending_secret, JSON.stringify(recovery.hashes), user.id);
     if (step > 0) d.prepare('UPDATE users SET totp_last_step = ? WHERE id = ?').run(step, user.id);
     if (usedRecovery) {
       const left = JSON.parse(user.recovery_codes || '[]').filter((x) => x !== usedRecovery);
       d.prepare('UPDATE users SET recovery_codes = ? WHERE id = ?').run(JSON.stringify(left), user.id);
     }
     if (newHash) d.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(newHash, user.id);
-    d.prepare('UPDATE users SET last_admin_login = ? WHERE id = ?').run(Date.now(), user.id);
   });
   if (newHash) destroyAllSessions(user.id);
-  revokeCurrentSession(req);
-  const csrfToken = createSession(res, req, user.id, { admin: true });
-  req.user = user;
-  if (enrolling) audit(req, 'admin.2fa_enrolled');
-  audit(req, 'admin.login', { with: usedRecovery ? 'recovery code' : 'authenticator app' });
-  const left = usedRecovery ? JSON.parse(user.recovery_codes || '[]').length - 1 : null;
-  res.json({
-    user: portalUser(user), csrfToken, idleMinutes: config.adminIdleMs / 60000,
-    recoveryCodes: recovery ? recovery.codes : undefined,
-    recoveryCodesLeft: left === null ? undefined : left,
-  });
+  const out = openSession(req, res, user, usedRecovery ? 'recovery code' : step > 0 ? 'authenticator app' : 'password');
+  if (usedRecovery) out.recoveryCodesLeft = JSON.parse(user.recovery_codes || '[]').length - 1;
+  res.json(out);
 });
 
 router.post('/logout', (req, res) => {
@@ -202,8 +203,8 @@ router.post('/password', limiter, requireAdminSession, (req, res) => {
 });
 
 router.get('/security', requireAdminSession, (req, res) => {
-  const u = db.get().prepare('SELECT recovery_codes, last_admin_login FROM users WHERE id = ?').get(req.user.id);
-  res.json({ recoveryCodesLeft: JSON.parse(u.recovery_codes || '[]').length, lastSignIn: u.last_admin_login });
+  const u = db.get().prepare('SELECT totp_secret, recovery_codes, last_admin_login FROM users WHERE id = ?').get(req.user.id);
+  res.json({ twoStep: !!u.totp_secret, recoveryCodesLeft: JSON.parse(u.recovery_codes || '[]').length, lastSignIn: u.last_admin_login });
 });
 
 router.post('/recovery-codes', limiter, requireAdminSession, (req, res) => {
@@ -217,13 +218,19 @@ router.post('/recovery-codes', limiter, requireAdminSession, (req, res) => {
   res.json({ recoveryCodes: recovery.codes });
 });
 
-// Moving to a new phone: the password confirms it is really you, then the new app's code switches over.
-router.post('/authenticator', limiter, requireAdminSession, async (req, res) => {
+// Optional authenticator code: turning it on, or moving it to a new phone. The password confirms it is really
+// you, then a code from the app finishes it.
+const confirmPassword = (req) => {
   const user = db.get().prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (typeof req.body.password !== 'string' || !verifyPassword(req.body.password, user.password_hash)) {
     throw new HttpError(400, 'Password is incorrect.');
   }
-  const ch = await challengeFor({ ...user, totp_secret: null });
+  return user;
+};
+
+router.post('/authenticator', limiter, requireAdminSession, async (req, res) => {
+  const user = confirmPassword(req);
+  const ch = await challengeFor(user, { enrol: true });
   res.json({ challenge: ch.challenge, enrol: ch.enrol });
 });
 
@@ -240,11 +247,21 @@ router.post('/authenticator/confirm', limiter, requireAdminSession, (req, res) =
     if (ch.attempts + 1 >= MAX_CODE_ATTEMPTS) db.get().prepare('DELETE FROM admin_challenges WHERE token_hash = ?').run(ch.token_hash);
     throw new HttpError(400, 'That code is not right. Enter the 6-digit code the new app shows now.');
   }
+  const turningOn = !db.get().prepare('SELECT totp_secret FROM users WHERE id = ?').get(req.user.id).totp_secret;
+  const recovery = turningOn ? newRecoveryCodes() : null;
   db.tx((d) => {
     d.prepare('DELETE FROM admin_challenges WHERE token_hash = ?').run(ch.token_hash);
     d.prepare('UPDATE users SET totp_secret = ?, totp_last_step = ? WHERE id = ?').run(ch.pending_secret, step, req.user.id);
+    if (recovery) d.prepare('UPDATE users SET recovery_codes = ? WHERE id = ?').run(JSON.stringify(recovery.hashes), req.user.id);
   });
-  audit(req, 'admin.2fa_moved');
+  audit(req, turningOn ? 'admin.2fa_on' : 'admin.2fa_moved');
+  res.json({ ok: true, recoveryCodes: recovery ? recovery.codes : undefined });
+});
+
+router.post('/authenticator/off', limiter, requireAdminSession, (req, res) => {
+  confirmPassword(req);
+  db.get().prepare("UPDATE users SET totp_secret = NULL, totp_last_step = 0, recovery_codes = '[]' WHERE id = ?").run(req.user.id);
+  audit(req, 'admin.2fa_off');
   res.json({ ok: true });
 });
 

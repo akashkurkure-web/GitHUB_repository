@@ -32,9 +32,6 @@ async function call(method, path, body, session = {}) {
   return { status: res.status, data };
 }
 
-const totp = require('../src/totp');
-const codeFor = (enrol) => totp.codeAt(enrol.secret.replace(/\s/g, ''), totp.stepAt());
-
 test('owner setup: the first visit to /admin creates the owner, then setup closes', async () => {
   assert.equal((await call('GET', '/auth/setup')).data.needed, true);
   assert.equal((await call('GET', '/admin/auth/me')).data.setupNeeded, true);
@@ -43,12 +40,7 @@ test('owner setup: the first visit to /admin creates the owner, then setup close
   const owner = {};
   const r = await call('POST', '/admin/auth/setup', { name: 'Akash', email: 'Owner@Shop.in', password: 'ownerpass1' }, owner);
   assert.equal(r.status, 201);
-  assert.ok(r.data.challenge && r.data.enrol.qr.startsWith('data:image/svg+xml;base64,'), 'owner adds the store to an authenticator app');
-  assert.equal((await call('GET', '/admin/products', undefined, owner)).status, 401, 'no portal session until the code is entered');
-  const ok = await call('POST', '/admin/auth/verify', { challenge: r.data.challenge, code: codeFor(r.data.enrol) }, owner);
-  assert.equal(ok.status, 200);
-  assert.equal(ok.data.user.staffRole, 'owner');
-  assert.equal(ok.data.recoveryCodes.length, 10);
+  assert.equal(r.data.user.staffRole, 'owner', 'signed in straight away');
   assert.equal((await call('GET', '/admin/products', undefined, owner)).status, 200);
 
   assert.equal((await call('GET', '/auth/setup')).data.needed, false);
