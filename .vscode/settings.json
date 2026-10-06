@@ -1,0 +1,6 @@
+{
+  "python.terminal.activateEnvironment": true,
+  "files.associations": { "**/templates/**/*.html": "django-html" },
+  "emmet.includeLanguages": { "django-html": "html" },
+  "files.exclude": { "**/__pycache__": true }
+}

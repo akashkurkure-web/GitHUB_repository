@@ -1,0 +1,34 @@
+{% extends "legal/_layout.html" %}
+{% block title %}Terms of use{% endblock %}
+{% block heading %}Terms of use{% endblock %}
+{% block legal %}
+<p>These terms apply to your use of this website and to every order you place with {{ COMPANY.legal_name|default:PORTAL_NAME }} ("we", "us"). By creating an account, requesting a quote or placing an order you agree to them.</p>
+<h5>1. Who you are buying from</h5>
+<p>We are the seller of every product and service on this website. We manufacture through our production partners under our quality control, and we issue the tax invoice for your order.</p>
+<h5>2. Your designs and files</h5>
+<ul>
+  <li>You confirm that you own, or have permission to use, every file, drawing and logo you send us, and that printing it does not infringe anyone's patent, design, copyright or trade mark.</li>
+  <li>You keep all rights in your designs. We use them only to quote, produce and deliver your order, and share them only with the production partner working on it.</li>
+  <li>We may refuse any job, including weapons or weapon parts, items that imitate currency, documents or official seals, counterfeit branded goods, or anything unlawful.</li>
+</ul>
+<h5>3. Quotes, prices and taxes</h5>
+<ul>
+  <li>Shop prices and quotes are in Indian rupees, before GST. GST is added at the applicable rate and shown separately at checkout and on the invoice.</li>
+  <li>Quotes are valid for 15 days and are based on the files and specifications you supply. A change in design, quantity or material may change the price.</li>
+  <li>Prices include standard delivery within India unless the quote says otherwise.</li>
+</ul>
+<h5>4. Payment</h5>
+<p>We accept UPI and bank transfers to our company account only. An order is confirmed when we have received the full amount, or the advance for orders of ₹{{ ADVANCE_THRESHOLD }} and above ({{ ADVANCE_PERCENT }}% advance, balance before dispatch). We never ask for card details, OTPs or passwords.</p>
+<h5>5. Tolerances and appearance</h5>
+<p>3D printing produces visible layer lines and small dimensional variation, typically ±0.2 mm or ±0.5%, whichever is larger, depending on the technology. Colours may vary slightly between batches and from on-screen images. Tell us about critical dimensions before you approve the quote.</p>
+<h5>6. Medical models</h5>
+<p>Medical models are supplied for planning, education, training and prototyping only. They are not medical devices and must not be used in or on a patient or for diagnosis. You are responsible for removing patient-identifying information from files you send.</p>
+<h5>7. Delivery, cancellation and refunds</h5>
+<p>See our <a href="{% url 'core:page' 'shipping' %}">Shipping and delivery</a> and <a href="{% url 'core:page' 'refunds' %}">Cancellation and refunds</a> policies, which form part of these terms.</p>
+<h5>8. Liability</h5>
+<p>Our total liability for any order is limited to the amount you paid for that order. We are not liable for indirect or consequential losses. Nothing in these terms limits your rights under the Consumer Protection Act, 2019.</p>
+<h5>9. Your account</h5>
+<p>Keep your password private. You are responsible for activity on your account. Tell us at once if you suspect misuse.</p>
+<h5>10. Law and disputes</h5>
+<p>These terms are governed by the laws of India. Please first raise any issue through our <a href="{% url 'core:grievance' %}">grievance process</a>. Subject to your statutory rights as a consumer, courts in Mumbai have jurisdiction.</p>
+{% endblock %}

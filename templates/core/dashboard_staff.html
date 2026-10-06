@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Dashboard</h1><p class="sub">{% now "l, d F Y" %}</p></div>
+  <div class="d-flex gap-2"><a href="{% url 'orders:list' %}?scope=open" class="btn btn-primary"><i class="bi bi-kanban"></i> All open orders</a></div></div>
+{% if not PAYMENTS_ENABLED and user.is_owner %}<div class="alert alert-info small"><i class="bi bi-info-circle me-1"></i>Quote-only mode: bank and UPI details are not set yet, so customers are told you'll share payment details. Add them in Vercel when the company account is open.</div>{% endif %}
+<div class="row g-4 mb-4">
+  <div class="col-6 col-xl-2"><div class="card kpi"><div class="icon bg-soft-blue"><i class="bi bi-inbox"></i></div><div><div class="value">{{ kpi_new }}</div><div class="label">New requests</div></div></div></div>
+  <div class="col-6 col-xl-2"><div class="card kpi"><div class="icon bg-soft-purple"><i class="bi bi-calculator"></i></div><div><div class="value">{{ kpi_pricing }}</div><div class="label">Being priced</div></div></div></div>
+  <div class="col-6 col-xl-2"><div class="card kpi"><div class="icon bg-soft-amber"><i class="bi bi-send"></i></div><div><div class="value">{{ kpi_quoted }}</div><div class="label">With customer</div></div></div></div>
+  <div class="col-6 col-xl-2"><a href="{% url 'orders:list' %}?scope=payments" class="card kpi text-reset"><div class="icon {% if kpi_payments %}bg-soft-red{% else %}bg-soft-green{% endif %}"><i class="bi bi-cash-coin"></i></div><div><div class="value">{{ kpi_payments }}</div><div class="label">Payments to check</div></div></a></div>
+  <div class="col-6 col-xl-2"><div class="card kpi"><div class="icon bg-soft-teal"><i class="bi bi-printer"></i></div><div><div class="value">{{ kpi_production }}</div><div class="label">In production</div></div></div></div>
+  <div class="col-6 col-xl-2"><div class="card kpi"><div class="icon bg-soft-green"><i class="bi bi-graph-up-arrow"></i></div><div><div class="value">{{ CURRENCY }}{{ kpi_sales|floatformat:0|intcomma }}</div><div class="label">Delivered this month{% if kpi_margin is not None %} · margin {{ CURRENCY }}{{ kpi_margin|floatformat:0|intcomma }}{% endif %}</div></div></div></div>
+</div>
+<div class="row g-4">
+  <div class="col-xl-8">
+    <div class="card mb-4"><div class="card-header">Needs attention <span class="small text-muted fw-normal">new requests and prices ready to quote</span></div>
+      {% include "partials/_order_table.html" with orders=needs_attention %}</div>
+    <div class="card"><div class="card-header d-flex justify-content-between"><span>Latest orders</span><a href="{% url 'orders:list' %}" class="small">View all</a></div>
+      {% include "partials/_order_table.html" with orders=recent %}</div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card mb-4"><div class="card-header">Pipeline</div><div class="card-body">
+      {% for v, l, c, b, pct in pipeline %}<a href="{% url 'orders:list' %}?status={{ v }}" class="d-block text-reset mb-2"><div class="d-flex justify-content-between small"><span>{{ l }}</span><span class="fw-semibold">{{ c }}</span></div><div class="load-bar"><span class="bar-{{ b }}" style="width:{{ pct }}%"></span></div></a>{% endfor %}
+      {% if kpi_overdue %}<div class="alert alert-danger small py-2 mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>{{ kpi_overdue }} open order{{ kpi_overdue|pluralize }} past the customer's date.</div>{% endif %}
+    </div></div>
+    {% if pending_payments %}<div class="card mb-4"><div class="card-header">Payments waiting{% if not user.is_owner %} for owner approval{% endif %}</div><div class="list-group list-group-flush">
+      {% for p in pending_payments %}<a href="{{ p.order.get_absolute_url }}#payments" class="list-group-item list-group-item-action small d-flex justify-content-between"><span><span class="order-no">{{ p.order.number }}</span> · UTR {{ p.reference }}</span><strong>{{ CURRENCY }}{{ p.amount|floatformat:0|intcomma }}</strong></a>{% endfor %}
+    </div></div>{% endif %}
+    <div class="card"><div class="card-header d-flex justify-content-between"><span>Open complaints</span><a href="{% url 'core:grievance_list' %}" class="small">All</a></div><div class="list-group list-group-flush">
+      {% for g in grievances %}<a href="{% url 'core:grievance_list' %}?id={{ g.pk }}" class="list-group-item list-group-item-action small"><div class="d-flex justify-content-between"><span>{{ g.number }} · {{ g.subject|truncatechars:30 }}</span>{% if g.is_late %}<span class="text-danger fw-semibold">Late</span>{% endif %}</div></a>
+      {% empty %}<div class="p-3 small text-muted">No open complaints.</div>{% endfor %}
+    </div></div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% load humanize %}
+<div class="price-box small">
+  <div class="d-flex justify-content-between"><span>Price{% if order.quantity > 1 %} ({{ order.quantity|intcomma }} pcs){% endif %}</span><span>{{ CURRENCY }}{{ order.price|floatformat:2|intcomma }}</span></div>
+  {% with t=order.tax %}
+  {% if t.intra %}
+    <div class="d-flex justify-content-between text-muted"><span>CGST {{ t.half_rate }}%</span><span>{{ CURRENCY }}{{ t.cgst|floatformat:2|intcomma }}</span></div>
+    <div class="d-flex justify-content-between text-muted"><span>SGST {{ t.half_rate }}%</span><span>{{ CURRENCY }}{{ t.sgst|floatformat:2|intcomma }}</span></div>
+  {% else %}
+    <div class="d-flex justify-content-between text-muted"><span>IGST {{ t.rate }}%</span><span>{{ CURRENCY }}{{ t.igst|floatformat:2|intcomma }}</span></div>
+  {% endif %}
+  {% endwith %}
+  <div class="d-flex justify-content-between fw-bold fs-6 border-top pt-2 mt-1"><span>Total</span><span>{{ CURRENCY }}{{ order.total|floatformat:2|intcomma }}</span></div>
+  {% if order.needs_advance_only %}<div class="text-muted mt-1">{{ CURRENCY }}{{ order.advance_due|floatformat:0|intcomma }} advance to start, balance before dispatch.</div>{% endif %}
+  <div class="text-muted mt-1">Delivery within India included.</div>
+</div>

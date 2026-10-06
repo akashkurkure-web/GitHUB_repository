@@ -1,0 +1,25 @@
+{% extends "accounts/_auth_layout.html" %}
+{% block title %}Create account{% endblock %}
+{% block form %}
+<a href="/" class="small d-inline-block mb-4"><i class="bi bi-arrow-left"></i> Back to website</a>
+<h3 class="fw-bold mb-1">Create your account</h3>
+<p class="text-muted mb-4">Order from the shop, request quotes and track every order.</p>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger py-2">{% for e in form.non_field_errors %}{{ e }}{% endfor %}</div>{% endif %}
+  <div class="row">
+    <div class="col-sm-6">{% include "partials/_field.html" with field=form.first_name %}</div>
+    <div class="col-sm-6">{% include "partials/_field.html" with field=form.last_name %}</div>
+    <div class="col-sm-7">{% include "partials/_field.html" with field=form.email %}</div>
+    <div class="col-sm-5">{% include "partials/_field.html" with field=form.phone %}</div>
+    <div class="col-sm-7">{% include "partials/_field.html" with field=form.company %}</div>
+    <div class="col-sm-5">{% include "partials/_field.html" with field=form.gstin %}</div>
+    <div class="col-sm-6">{% include "partials/_field.html" with field=form.password1 %}</div>
+    <div class="col-sm-6">{% include "partials/_field.html" with field=form.password2 %}</div>
+  </div>
+  {% include "partials/_field.html" with field=form.accept_terms %}
+  <p class="small text-muted">Read our <a href="{% url 'core:page' 'terms' %}" target="_blank">Terms of use</a> and <a href="{% url 'core:page' 'privacy' %}" target="_blank">Privacy policy</a>.</p>
+  <button class="btn btn-primary w-100 py-2">Create account</button>
+</form>
+<p class="text-center small mt-4">Already registered? <a href="{% url 'accounts:login' %}">Sign in</a></p>
+{% endblock %}

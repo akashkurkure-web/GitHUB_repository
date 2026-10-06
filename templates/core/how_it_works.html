@@ -1,0 +1,17 @@
+{% extends "legal/_layout.html" %}
+{% block title %}How it works{% endblock %}
+{% block heading %}How it works{% endblock %}
+{% block legal %}
+<h4>1. Choose how to order</h4>
+<p><strong>Shop:</strong> ready designs (mainly home decor) have a fixed price. Add your delivery address and place the order.<br>
+<strong>Quote request:</strong> for custom parts, mass manufacturing and medical models, upload your files (up to {{ MAX_UPLOAD_MB|floatformat:0 }} MB each, or share a link for bigger files). No account is needed; we create one for you and email a link to set your password.</p>
+<h4>2. We review and quote</h4>
+<p>Our team checks your design for printability, chooses the right technology and material, and sends a quote with the price, GST and expected dispatch time. Quotes are valid for 15 days.</p>
+<h4>3. Pay to confirm</h4>
+<p>Pay by UPI or bank transfer to our company account. The account details and a UPI QR code appear on your order page. Enter the UTR number after paying; we confirm once it shows in our bank statement. Orders of ₹{{ ADVANCE_THRESHOLD }} and above need a {{ ADVANCE_PERCENT }}% advance to start, with the balance due before dispatch. We do not accept cash.</p>
+<h4>4. Production and quality check</h4>
+<p>Your parts are printed, cleaned, finished and inspected. You can follow each stage on the order tracker.</p>
+<h4>5. Dispatch and delivery</h4>
+<p>We ship by a reputed courier and share the AWB number and tracking link. Your GST tax invoice is available in your account as soon as the order ships.</p>
+<div class="mt-4"><a href="{% url 'orders:request_quote' %}" class="btn btn-primary">Request a quote</a> <a href="{% url 'catalog:list' %}" class="btn btn-outline-primary">Visit the shop</a></div>
+{% endblock %}

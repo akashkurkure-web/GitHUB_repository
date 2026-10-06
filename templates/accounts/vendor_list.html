@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Vendor{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Production partner</h1><p class="sub">Hidden from customers. New requests go to the default partner.</p></div><a href="{% url 'accounts:vendor_create' %}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Add partner</a></div>
+<div class="card"><div class="table-responsive"><table class="table table-hover">
+  <thead><tr><th>Company</th><th>Contact</th><th>GSTIN</th><th>Udyam</th><th>Open jobs</th><th>Completed</th><th></th></tr></thead>
+  <tbody>{% for v in vendors %}<tr class="row-link" data-href="{% url 'accounts:vendor_edit' v.pk %}"><td class="fw-semibold">{{ v.company_name }}{% if v.is_default %} <span class="chip">Default</span>{% endif %}{% if not v.is_active %} <span class="chip">Inactive</span>{% endif %}</td><td>{{ v.contact_person }}<div class="small text-muted">{{ v.phone }}</div></td><td>{{ v.gstin|default:"—" }}</td><td>{{ v.udyam_number|default:"—" }}</td><td>{{ v.open_jobs }}</td><td>{{ v.total_jobs }}</td><td><a href="{% url 'accounts:vendor_edit' v.pk %}">Edit</a></td></tr>
+  {% empty %}<tr><td colspan="7"><div class="empty">No partner yet.</div></td></tr>{% endfor %}</tbody>
+</table></div></div>
+{% endblock %}

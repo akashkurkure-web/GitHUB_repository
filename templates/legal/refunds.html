@@ -1,0 +1,19 @@
+{% extends "legal/_layout.html" %}
+{% block title %}Cancellation and refunds{% endblock %}
+{% block heading %}Cancellation and refunds{% endblock %}
+{% block legal %}
+<h5>Before production starts</h5>
+<p>You can cancel from your order page at any time before the order is confirmed. If you have already paid and production has not started, write to us and we refund the full amount.</p>
+<h5>After production starts</h5>
+<p>Every order is made to order, often to your own design, so it cannot be cancelled once printing has begun. Material and machine time already used are charged; any balance is refunded.</p>
+<h5>Damaged, defective or wrong items</h5>
+<ul>
+  <li>Tell us within <strong>48 hours of delivery</strong> with photos of the parcel and the item, using the messages on your order or our <a href="{% url 'core:grievance' %}">grievance page</a>.</li>
+  <li>If the item is damaged in transit, defective, or does not match the approved quote and files, we reprint it free of charge or refund you, at your choice.</li>
+  <li>Normal layer lines, small colour variation and tolerances described in our <a href="{% url 'core:page' 'terms' %}">terms</a> are not defects. Problems caused by errors in the files you supplied are not covered.</li>
+</ul>
+<h5>Change of mind</h5>
+<p>Because items are made to order, we do not accept returns for change of mind, except for unused shop items in original packing reported within 7 days of delivery, where you pay the return courier and we refund the item price.</p>
+<h5>How refunds are paid</h5>
+<p>Refunds go back to the bank account or UPI ID the payment came from, within 7 working days of approval. We will tell you the reference number once sent.</p>
+{% endblock %}

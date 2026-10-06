@@ -1,0 +1,18 @@
+{% extends "layout_site.html" %}
+{% block title %}Request received{% endblock %}
+{% block content %}
+<div class="container py-5 text-center" style="max-width:640px">
+  <div class="feature-icon bg-soft-green mx-auto"><i class="bi bi-check2-circle"></i></div>
+  <h2 class="fw-bold">Thank you, we have your request</h2>
+  <p class="text-secondary">Your reference is <strong>{{ order.number }}</strong>. We will email the quote to <strong>{{ order.customer.email }}</strong>, usually within one working day.</p>
+  {% if created_account %}
+    <div class="card text-start my-4"><div class="card-body">
+      <h6><i class="bi bi-envelope-open text-primary me-1"></i>Check your inbox</h6>
+      <p class="small mb-0">We have created an account for you and sent a link to set your password, so you can approve the quote and track the order online. Didn't get it? <a href="{% url 'accounts:password_reset' %}">Send the link again</a>.</p>
+    </div></div>
+  {% else %}
+    <p class="small">You already have an account with us. <a href="{% url 'accounts:login' %}">Sign in</a> to track this request.</p>
+  {% endif %}
+  <a href="/" class="btn btn-primary">Back to home</a>
+</div>
+{% endblock %}

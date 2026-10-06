@@ -1,0 +1,16 @@
+<h6 class="form-section">Delivery address</h6>
+<div class="row">
+  <div class="col-md-6">{% include "partials/_field.html" with field=form.ship_name %}</div>
+  <div class="col-md-6">{% include "partials/_field.html" with field=form.ship_phone %}</div>
+  <div class="col-12">{% include "partials/_field.html" with field=form.ship_address %}</div>
+  <div class="col-md-4">{% include "partials/_field.html" with field=form.ship_city %}</div>
+  <div class="col-md-5">{% include "partials/_field.html" with field=form.ship_state %}</div>
+  <div class="col-md-3">{% include "partials/_field.html" with field=form.ship_pincode %}</div>
+</div>
+<details class="mb-3" {% if form.bill_company.value or form.bill_gstin.value or form.bill_gstin.errors %}open{% endif %}>
+  <summary class="small text-primary mb-2">Need a GST invoice in your company's name?</summary>
+  <div class="row">
+    <div class="col-md-7">{% include "partials/_field.html" with field=form.bill_company %}</div>
+    <div class="col-md-5">{% include "partials/_field.html" with field=form.bill_gstin %}</div>
+  </div>
+</details>

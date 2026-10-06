@@ -1,0 +1,27 @@
+{% load humanize %}
+<div class="table-responsive">
+<table class="table table-hover">
+  <thead><tr>
+    <th>Order</th><th>Item</th>
+    {% if user.is_staff_member %}<th>Customer</th>{% endif %}
+    <th>Qty</th><th>Status</th><th>Needed by</th>
+    {% if user.is_vendor %}{% if user.vendor_manager %}<th class="text-end">Vendor price</th>{% endif %}{% else %}<th class="text-end">Total</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for o in orders %}
+    <tr class="row-link" data-href="{{ o.get_absolute_url }}">
+      <td><a href="{{ o.get_absolute_url }}" class="order-no">{{ o.number }}</a><div class="small text-muted">{{ o.created_at|date:"d M Y" }}</div></td>
+      <td><div class="fw-medium">{{ o.title|truncatechars:42 }}</div><div class="small text-muted">{{ o.get_segment_display }}</div></td>
+      {% if user.is_staff_member %}<td>{{ o.customer.display_name }}{% if o.bill_company %}<div class="small text-muted">{{ o.bill_company }}</div>{% endif %}</td>{% endif %}
+      <td>{{ o.quantity|intcomma }}</td>
+      <td><span class="status status-{{ o.badge }}">{% if user.is_vendor and o.status == 'pricing' %}Price needed{% elif user.is_vendor and o.status == 'confirmed' %}New job{% else %}{{ o.get_status_display }}{% endif %}</span></td>
+      <td>{% if o.required_by %}<span class="{% if o.is_overdue %}text-danger fw-semibold{% endif %}">{{ o.required_by|date:"d M" }}{% if o.is_overdue %} <i class="bi bi-exclamation-triangle"></i>{% endif %}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      {% if user.is_vendor %}{% if user.vendor_manager %}<td class="text-end">{% if o.vendor_price %}{{ CURRENCY }}{{ o.vendor_price|floatformat:2|intcomma }}{% else %}—{% endif %}</td>{% endif %}
+      {% else %}<td class="text-end fw-semibold">{% if o.price is not None %}{{ CURRENCY }}{{ o.total|floatformat:2|intcomma }}{% else %}<span class="text-muted small fw-normal">Awaiting quote</span>{% endif %}</td>{% endif %}
+    </tr>
+  {% empty %}
+    <tr><td colspan="8"><div class="empty"><i class="bi bi-inbox"></i>Nothing to show here yet.</div></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

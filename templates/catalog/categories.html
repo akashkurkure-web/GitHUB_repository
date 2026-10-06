@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Categories{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Shop categories</h1><p class="sub">Group products in the shop. The segment links a category to its solution page.</p></div></div>
+<div class="row g-4">
+  <div class="col-lg-7"><div class="card"><div class="table-responsive"><table class="table">
+    <thead><tr><th>Category</th><th>Segment</th><th>Products</th></tr></thead>
+    <tbody>{% for c in categories %}<tr><td><i class="bi bi-{{ c.icon }} me-2 text-primary"></i>{{ c.name }}<div class="small text-muted">{{ c.description }}</div></td><td>{{ c.get_segment_display }}</td><td>{{ c.products.count }}</td></tr>{% endfor %}</tbody>
+  </table></div></div></div>
+  <div class="col-lg-5"><div class="card"><div class="card-header">Add category</div><div class="card-body">
+    <form method="post" novalidate>{% csrf_token %}{% for field in form %}{% include "partials/_field.html" %}{% endfor %}<button class="btn btn-primary">Add</button></form>
+  </div></div></div>
+</div>
+{% endblock %}

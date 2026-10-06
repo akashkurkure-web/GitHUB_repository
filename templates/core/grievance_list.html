@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Complaints{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Complaints</h1><p class="sub">Acknowledge within 48 hours, resolve within one month (Consumer Protection E-Commerce Rules, 2020).</p></div></div>
+<div class="row g-4">
+  <div class="{% if selected %}col-xl-7{% else %}col-12{% endif %}"><div class="card"><div class="table-responsive"><table class="table table-hover">
+    <thead><tr><th>Ref</th><th>Subject</th><th>From</th><th>Status</th><th>Due</th></tr></thead>
+    <tbody>{% for g in items %}<tr class="row-link" data-href="?id={{ g.pk }}"><td class="order-no">{{ g.number }}</td><td>{{ g.subject|truncatechars:40 }}</td><td>{{ g.name }}</td><td>{{ g.get_status_display }}</td>
+      <td class="{% if g.is_late %}text-danger fw-semibold{% endif %}">{% if g.status == 'open' %}Ack by {{ g.ack_due|date:"d M H:i" }}{% elif g.status == 'acknowledged' %}Resolve by {{ g.resolve_due|date:"d M" }}{% else %}Done {{ g.resolved_at|date:"d M" }}{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="5"><div class="empty"><i class="bi bi-emoji-smile"></i>No complaints.</div></td></tr>{% endfor %}</tbody>
+  </table></div></div></div>
+  {% if selected %}
+  <div class="col-xl-5"><div class="card"><div class="card-header">{{ selected.number }} · {{ selected.subject }}</div><div class="card-body">
+    <p class="small mb-1"><strong>{{ selected.name }}</strong> · <a href="mailto:{{ selected.email }}">{{ selected.email }}</a>{% if selected.phone %} · {{ selected.phone }}{% endif %}</p>
+    {% if selected.order_number %}<p class="small mb-1">Order: {{ selected.order_number }}</p>{% endif %}
+    <p class="small text-muted">Received {{ selected.created_at|date:"d M Y, H:i" }}</p>
+    <div class="bg-light rounded p-3 small mb-3">{{ selected.details|linebreaksbr }}</div>
+    <form method="post" novalidate>{% csrf_token %}{% for field in form %}{% include "partials/_field.html" %}{% endfor %}<button class="btn btn-primary">Save and email reply</button></form>
+  </div></div></div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% load static humanize %}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if is_tax_invoice %}Tax invoice {{ order.invoice_number }}{% elif is_proforma %}Proforma {{ order.number }}{% else %}Quotation {{ order.number }}{% endif %}</title>
+<link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
+<style>
+  body{background:#f4f6fb;font-size:13px;color:#1e293b}
+  .sheet{max-width:820px;margin:24px auto;background:#fff;padding:36px;border:1px solid #e5e8f0;border-radius:10px}
+  h1{font-size:20px;letter-spacing:.04em;text-transform:uppercase}
+  table.lines th{background:#f1f5f9;font-size:11px;text-transform:uppercase}
+  .muted{color:#64748b}
+  @media print{body{background:#fff}.sheet{border:0;margin:0;padding:0;max-width:none}.no-print{display:none}}
+</style></head>
+<body>
+<div class="sheet">
+  <div class="d-flex justify-content-between no-print mb-3"><a href="{{ order.get_absolute_url }}">← Back to order</a><button class="btn btn-sm btn-primary" onclick="window.print()">Print / save as PDF</button></div>
+  <div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+      <div class="fw-bold fs-5">{{ COMPANY.legal_name|default:PORTAL_NAME }}</div>
+      <div class="muted">{{ COMPANY.address }}</div>
+      {% if COMPANY.gstin %}<div>GSTIN: <strong>{{ COMPANY.gstin }}</strong> · State: {{ COMPANY.state }}</div>{% endif %}
+      {% if COMPANY.cin %}<div class="muted">CIN: {{ COMPANY.cin }}</div>{% endif %}
+      <div class="muted">{{ COMPANY.email }}{% if COMPANY.phone %} · {{ COMPANY.phone }}{% endif %}</div>
+    </div>
+    <div class="text-end">
+      <h1 class="mb-1">{% if is_tax_invoice %}Tax invoice{% elif is_proforma %}Proforma invoice{% else %}Quotation{% endif %}</h1>
+      {% if order.invoice_number %}<div>No. <strong>{{ order.invoice_number }}</strong></div><div>Date: {{ order.invoice_date|date:"d M Y" }}</div>
+      {% else %}<div>Ref. <strong>{{ order.number }}</strong></div><div>Date: {{ order.quoted_at|default:today|date:"d M Y" }}</div>{% if order.quote_valid_until %}<div class="muted">Valid until {{ order.quote_valid_until|date:"d M Y" }}</div>{% endif %}{% endif %}
+      <div class="muted">Order {{ order.number }}</div>
+    </div>
+  </div>
+  {% if not is_tax_invoice %}<div class="alert alert-secondary py-2 small">{% if is_proforma %}This is a proforma invoice, not a tax invoice.{% if not COMPANY.gstin %} A GST tax invoice will be issued once our GST registration is active.{% else %} The tax invoice is issued when the order ships.{% endif %}{% else %}This is a quotation, not an invoice. The tax invoice is issued when the order ships.{% endif %}</div>{% endif %}
+  <div class="row mb-4">
+    <div class="col-6"><div class="muted text-uppercase small fw-semibold mb-1">Bill to</div>
+      <div class="fw-semibold">{{ order.bill_company|default:order.customer.display_name }}</div>
+      {% if order.bill_gstin %}<div>GSTIN: {{ order.bill_gstin }}</div>{% endif %}
+      <div>{{ order.customer.email }}</div></div>
+    <div class="col-6"><div class="muted text-uppercase small fw-semibold mb-1">Ship to</div>
+      <div class="fw-semibold">{{ order.ship_name }}</div><div>{{ order.ship_address|linebreaksbr }}</div><div>{{ order.ship_city }}, {{ order.ship_state }} {{ order.ship_pincode }}</div>
+      <div>Place of supply: <strong>{{ order.ship_state }}</strong></div></div>
+  </div>
+  <table class="table table-bordered lines">
+    <thead><tr><th>#</th><th>Description</th><th>HSN</th><th class="text-end">Qty</th><th class="text-end">Rate</th><th class="text-end">Taxable value</th></tr></thead>
+    <tbody>
+    {% for l in lines %}<tr><td>{{ forloop.counter }}</td><td>{{ l.description }}</td><td>{{ l.hsn|default:"" }}</td><td class="text-end">{{ l.qty|intcomma }}</td><td class="text-end">{{ l.rate|floatformat:2|intcomma }}</td><td class="text-end">{{ l.amount|floatformat:2|intcomma }}</td></tr>{% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="5" class="text-end">Taxable value</td><td class="text-end">{{ order.price|floatformat:2|intcomma }}</td></tr>
+      {% if tax.intra %}
+      <tr><td colspan="5" class="text-end">CGST @ {{ tax.half_rate }}%</td><td class="text-end">{{ tax.cgst|floatformat:2|intcomma }}</td></tr>
+      <tr><td colspan="5" class="text-end">SGST @ {{ tax.half_rate }}%</td><td class="text-end">{{ tax.sgst|floatformat:2|intcomma }}</td></tr>
+      {% else %}
+      <tr><td colspan="5" class="text-end">IGST @ {{ tax.rate }}%</td><td class="text-end">{{ tax.igst|floatformat:2|intcomma }}</td></tr>
+      {% endif %}
+      <tr class="fw-bold"><td colspan="5" class="text-end">Total (₹)</td><td class="text-end">{{ order.total|floatformat:2|intcomma }}</td></tr>
+      {% if order.amount_paid %}<tr><td colspan="5" class="text-end">Received</td><td class="text-end">{{ order.amount_paid|floatformat:2|intcomma }}</td></tr>
+      <tr><td colspan="5" class="text-end">Balance</td><td class="text-end">{{ order.balance|floatformat:2|intcomma }}</td></tr>{% endif %}
+    </tfoot>
+  </table>
+  <div class="small muted">Tax payable on reverse charge: No. Prices include delivery within India.</div>
+  {% if BANK.account_number or BANK.upi_id %}<div class="small mt-2">Pay to: {% if BANK.account_number %}{{ BANK.account_name }}, A/c {{ BANK.account_number }}, IFSC {{ BANK.ifsc }}{% endif %}{% if BANK.upi_id %} · UPI {{ BANK.upi_id }}{% endif %}</div>{% endif %}
+  <div class="d-flex justify-content-between align-items-end mt-5">
+    <div class="small muted">Subject to Mumbai jurisdiction. This is a computer-generated document.</div>
+    <div class="text-end"><div class="small">For {{ COMPANY.legal_name|default:PORTAL_NAME }}</div><div style="height:48px"></div><div class="small border-top pt-1">Authorised signatory</div></div>
+  </div>
+</div>
+</body></html>

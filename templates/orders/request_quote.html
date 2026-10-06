@@ -1,0 +1,69 @@
+{% extends SHELL %}
+{% block title %}Request a quote{% endblock %}
+{% block content %}
+<div class="{% if not user.is_authenticated %}container py-5{% endif %}" style="max-width:980px">
+<div class="page-head"><div><h1>Request a quote</h1><p class="sub">Tell us what you need and attach your files. We reply with a price within one working day.{% if not user.is_authenticated %} Already a customer? <a href="{% url 'accounts:login' %}?next={{ request.path }}">Sign in</a>.{% endif %}</p></div></div>
+<form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}
+{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card mb-4"><div class="card-body">
+      {% if not user.is_authenticated %}
+      <h6 class="form-section">Your details</h6>
+      <div class="row">
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.name %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.company %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.email %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.phone %}</div>
+      </div>
+      {% endif %}
+      <h6 class="form-section">Your job</h6>
+      <div class="row">
+        <div class="col-md-5">{% include "partials/_field.html" with field=form.segment %}</div>
+        <div class="col-md-7">{% include "partials/_field.html" with field=form.title %}</div>
+      </div>
+      <div id="medical-note" class="alert alert-warning small d-none"><i class="bi bi-exclamation-triangle me-1"></i>Medical models are for planning, training and demonstration only, not for use in or on a patient. Please remove patient names and identifiers from your files.</div>
+      {% include "partials/_field.html" with field=form.description %}
+      <div class="row">
+        <div class="col-md-3">{% include "partials/_field.html" with field=form.quantity %}</div>
+        <div class="col-md-4">{% include "partials/_field.html" with field=form.technology %}</div>
+        <div class="col-md-5">{% include "partials/_field.html" with field=form.material %}</div>
+        <div class="col-md-4">{% include "partials/_field.html" with field=form.colour %}</div>
+        <div class="col-md-4">{% include "partials/_field.html" with field=form.finish %}</div>
+        <div class="col-md-4">{% include "partials/_field.html" with field=form.required_by %}</div>
+      </div>
+      <h6 class="form-section">Files</h6>
+      <div class="dropzone mb-2" data-max-mb="{{ MAX_UPLOAD_MB }}">
+        <i class="bi bi-cloud-arrow-up fs-2 text-primary"></i>
+        <div class="fw-semibold">Drop files here or click to browse</div>
+        <div class="small text-muted">STL, OBJ, 3MF, STEP, IGES, PDF, DXF, DWG, PNG, JPG · up to {{ MAX_UPLOAD_MB|floatformat:0 }} MB each</div>
+        {{ form.files }}
+        <ul class="dropzone-list"></ul>
+      </div>
+      {% for e in form.files.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+      {% include "partials/_field.html" with field=form.file_link %}
+      {% include "partials/_ship_fields.html" %}
+      <div id="medical-ack" class="d-none">{% include "partials/_field.html" with field=form.medical_ack %}</div>
+      {% if form.accept_terms %}{% include "partials/_field.html" with field=form.accept_terms %}{% endif %}
+      <button class="btn btn-primary btn-lg"><i class="bi bi-send"></i> Send request</button>
+    </div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card mb-3"><div class="card-body">
+      <h6>What happens next</h6>
+      <ol class="small ps-3 mb-0">
+        <li class="mb-2">We check your files for printability.</li>
+        <li class="mb-2">You get a quote by email with price, GST and dispatch time.</li>
+        <li class="mb-2">Approve it online and pay by UPI or bank transfer.</li>
+        <li>We print, inspect and ship. Track it in your account.</li>
+      </ol>
+    </div></div>
+    <div class="card"><div class="card-body small">
+      <h6><i class="bi bi-shield-lock text-primary me-1"></i>Your design is safe</h6>
+      Files are visible only to our team and the production partner making your order. We never publish or reuse your designs.
+    </div></div>
+  </div>
+</div>
+</form>
+</div>
+{% endblock %}

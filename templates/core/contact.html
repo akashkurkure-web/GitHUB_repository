@@ -1,0 +1,25 @@
+{% extends "legal/_layout.html" %}
+{% block title %}Contact us{% endblock %}
+{% block heading %}Contact us{% endblock %}
+{% block legal %}
+<div class="row g-4">
+  <div class="col-md-6"><div class="card h-100"><div class="card-body">
+    <h5><i class="bi bi-envelope text-primary me-2"></i>Email</h5><p class="mb-1"><a href="mailto:{{ COMPANY.email }}">{{ COMPANY.email }}</a></p><p class="small text-muted mb-0">We reply within one working day.</p>
+  </div></div></div>
+  <div class="col-md-6"><div class="card h-100"><div class="card-body">
+    <h5><i class="bi bi-telephone text-primary me-2"></i>Phone and WhatsApp</h5>
+    <p class="mb-1">{% if COMPANY.phone %}<a href="tel:{{ COMPANY.phone }}">{{ COMPANY.phone }}</a>{% else %}<span class="text-muted">Coming soon</span>{% endif %}</p>
+    {% if COMPANY.whatsapp %}<p class="mb-0"><a href="https://wa.me/{{ COMPANY.whatsapp }}" rel="noopener"><i class="bi bi-whatsapp"></i> Chat on WhatsApp</a></p>{% endif %}
+    <p class="small text-muted mb-0">Monday to Saturday, 10 am to 7 pm IST.</p>
+  </div></div></div>
+  <div class="col-md-6"><div class="card h-100"><div class="card-body">
+    <h5><i class="bi bi-geo-alt text-primary me-2"></i>Registered office</h5>
+    <p class="mb-0">{{ COMPANY.legal_name|default:PORTAL_NAME }}<br>{{ COMPANY.address }}</p>
+  </div></div></div>
+  <div class="col-md-6"><div class="card h-100"><div class="card-body">
+    <h5><i class="bi bi-life-preserver text-primary me-2"></i>Complaints</h5>
+    <p class="mb-2">Not happy with an order? Raise it with our grievance officer.</p>
+    <a href="{% url 'core:grievance' %}" class="btn btn-outline-primary btn-sm">Raise a complaint</a>
+  </div></div></div>
+</div>
+{% endblock %}

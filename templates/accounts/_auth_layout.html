@@ -1,0 +1,19 @@
+{% extends "base_public.html" %}
+{% block body %}
+<div class="auth-wrap">
+  <div class="auth-side">
+    <a href="/" class="d-flex align-items-center gap-2 fw-bold fs-5 text-white"><span class="brand-mark"><i class="bi bi-hexagon"></i></span>{{ PORTAL_NAME }}</a>
+    <div>
+      <h2 class="mb-3">3D printing for industry, design and everyday life.</h2>
+      <ul class="list-unstyled">
+        <li class="mb-2"><i class="bi bi-check-circle text-info me-2"></i>Upload STL, STEP, 3MF or a drawing</li>
+        <li class="mb-2"><i class="bi bi-check-circle text-info me-2"></i>Quotes with GST, approved online</li>
+        <li class="mb-2"><i class="bi bi-check-circle text-info me-2"></i>Pay by UPI or bank transfer</li>
+        <li class="mb-2"><i class="bi bi-check-circle text-info me-2"></i>Track printing and delivery live</li>
+      </ul>
+    </div>
+    <small>© {% now "Y" %} {{ COMPANY.legal_name|default:PORTAL_NAME }}</small>
+  </div>
+  <div class="auth-form"><div class="inner">{% block form %}{% endblock %}</div></div>
+</div>
+{% endblock %}

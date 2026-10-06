@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{% if vendor %}{{ vendor.company_name }}{% else %}New partner{% endif %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{% if vendor %}{{ vendor.company_name }}{% else %}New production partner{% endif %}</h1><p class="sub">Collect GSTIN, PAN, Udyam and bank details before the first settlement.</p></div></div>
+<div class="row g-4">
+  <div class="col-xl-8"><form method="post" novalidate class="card"><div class="card-body">{% csrf_token %}
+    <div class="row">{% for field in form %}<div class="{% if field.name == 'address' or field.name == 'notes' %}col-12{% else %}col-md-6{% endif %}">{% include "partials/_field.html" %}</div>{% endfor %}</div>
+    <button class="btn btn-primary">Save</button> <a href="{% url 'accounts:vendor_list' %}" class="btn btn-link">Cancel</a>
+  </div></form></div>
+  {% if vendor %}<div class="col-xl-4"><div class="card"><div class="card-header">Logins for this partner</div><div class="list-group list-group-flush">
+    {% for m in members %}<div class="list-group-item small">{{ m.display_name }} · {{ m.role_label }}<div class="text-muted">{{ m.email }}</div></div>{% empty %}<div class="p-3 small text-muted">No logins yet.</div>{% endfor %}
+  </div><div class="card-body"><a href="{% url 'accounts:team' %}" class="btn btn-sm btn-outline-primary">Create a vendor login</a></div></div></div>{% endif %}
+</div>
+{% endblock %}

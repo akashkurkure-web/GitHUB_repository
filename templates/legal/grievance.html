@@ -1,0 +1,26 @@
+{% extends SHELL %}
+{% block title %}Grievance redressal{% endblock %}
+{% block content %}
+<div class="{% if not user.is_authenticated %}container py-5{% endif %}" style="max-width:860px">
+  <h1 class="fw-bold mb-2 h3">Grievance redressal</h1>
+  <p class="text-secondary">As required by the Consumer Protection (E-Commerce) Rules, 2020, we acknowledge every complaint within <strong>48 hours</strong> and aim to resolve it within <strong>one month</strong>.</p>
+  <div class="card mb-4"><div class="card-body small">
+    <strong>Grievance officer:</strong> {{ COMPANY.grievance_officer|default:"To be appointed" }}<br>
+    <strong>Email:</strong> {{ COMPANY.grievance_email|default:COMPANY.email }}{% if COMPANY.grievance_phone %} · <strong>Phone:</strong> {{ COMPANY.grievance_phone }}{% endif %}<br>
+    <strong>Address:</strong> {{ COMPANY.legal_name|default:PORTAL_NAME }}, {{ COMPANY.address }}
+  </div></div>
+  <div class="card"><div class="card-body">
+    <form method="post" novalidate>{% csrf_token %}
+      <div class="row">
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.name %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.email %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.phone %}</div>
+        <div class="col-md-6">{% include "partials/_field.html" with field=form.order_number %}</div>
+      </div>
+      {% include "partials/_field.html" with field=form.subject %}
+      {% include "partials/_field.html" with field=form.details %}
+      <button class="btn btn-primary">Submit complaint</button>
+    </form>
+  </div></div>
+</div>
+{% endblock %}

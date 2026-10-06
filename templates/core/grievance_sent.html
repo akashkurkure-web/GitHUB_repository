@@ -1,0 +1,10 @@
+{% extends SHELL %}
+{% block title %}Complaint received{% endblock %}
+{% block content %}
+<div class="container py-5 text-center" style="max-width:600px">
+  <div class="feature-icon bg-soft-green mx-auto"><i class="bi bi-check2-circle"></i></div>
+  <h2 class="fw-bold">Complaint received</h2>
+  <p class="text-secondary">Your reference is <strong>{{ g.number }}</strong>. We have emailed a copy to {{ g.email }}. Our grievance officer will reply within 48 hours.</p>
+  <a href="/" class="btn btn-primary">Back to home</a>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "layout_site.html" %}
+{% block title %}{{ info.title }}{% endblock %}
+{% block content %}
+<section class="hero hero-sm">
+  <div class="container">
+    <div class="row align-items-center g-4">
+      <div class="col-lg-7">
+        <span class="eyebrow mb-3"><i class="bi bi-{{ info.icon }} me-1"></i>{{ info.title }}</span>
+        <h1 class="mb-3">{{ info.title }}</h1>
+        <p class="lead text-secondary">{{ info.blurb }}</p>
+        <div class="d-flex flex-wrap gap-2 mt-4">
+          {% if key == "decor" %}
+            <a href="{% url 'catalog:list' %}" class="btn btn-primary btn-lg">Shop designs</a>
+            <a href="{% url 'orders:request_quote' %}?segment=custom" class="btn btn-light btn-lg border">Personalised piece</a>
+          {% else %}
+            <a href="{% url 'orders:request_quote' %}?segment={{ key }}" class="btn btn-primary btn-lg">{% if key == "medical" %}Send an enquiry{% else %}Get a quote{% endif %}</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card p-4">
+          <h6 class="mb-3">What you get</h6>
+          <ul class="list-unstyled mb-0">{% for p in info.points %}<li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>{{ p }}</li>{% endfor %}</ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="py-5">
+  <div class="container">
+    {% if key == "mass" %}
+      <div class="row g-4">
+        <div class="col-md-4"><h5>Volume pricing</h5><p class="text-secondary">The per-piece price falls as quantity rises. Tell us your annual volume for a rate card.</p></div>
+        <div class="col-md-4"><h5>Production slots</h5><p class="text-secondary">Orders of ₹50,000 and above start with a 50% advance; the balance is due before dispatch.</p></div>
+        <div class="col-md-4"><h5>Batch inspection</h5><p class="text-secondary">Sample pieces from every batch are checked against your critical dimensions and photographed.</p></div>
+      </div>
+    {% elif key == "custom" %}
+      <div class="row g-4">
+        <div class="col-md-4"><h5>Any file, any stage</h5><p class="text-secondary">STL, OBJ, 3MF, STEP, IGES, or a hand sketch with dimensions. We'll tell you if it can be printed.</p></div>
+        <div class="col-md-4"><h5>Material advice</h5><p class="text-secondary">PLA, PETG, ABS, TPU, Nylon and engineering resins. Not sure? Describe the use and we'll recommend.</p></div>
+        <div class="col-md-4"><h5>Iterate quickly</h5><p class="text-secondary">Revise and reorder from your account; every version and file stays with the order.</p></div>
+      </div>
+    {% elif key == "medical" %}
+      <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>We print models for <strong>planning, training, demonstration and prototyping</strong>. These are not medical devices and must not be used in or on a patient. Implants and patient-contact devices need a licensed manufacturer under the Medical Devices Rules, 2017.</div>
+      <div class="row g-4 mt-1">
+        <div class="col-md-4"><h5>Anatomical models</h5><p class="text-secondary">From de-identified CT or MRI segmentations (STL) for surgical planning and patient education.</p></div>
+        <div class="col-md-4"><h5>Training aids</h5><p class="text-secondary">Durable models for colleges, simulation labs and demonstrations.</p></div>
+        <div class="col-md-4"><h5>Confidentiality</h5><p class="text-secondary">Please remove patient names and identifiers before uploading. Files are visible only to our team and the production partner.</p></div>
+      </div>
+    {% endif %}
+    {% if products %}
+      <h4 class="mt-5 mb-3">Popular designs</h4>
+      <div class="row g-4">{% for p in products %}{% include "catalog/_product_card.html" %}{% endfor %}</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

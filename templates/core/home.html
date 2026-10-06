@@ -1,0 +1,90 @@
+{% extends "layout_site.html" %}{% load humanize %}
+{% block title %}3D printing in Mumbai for business and home{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="container">
+    <div class="row align-items-center g-4 g-lg-5">
+      <div class="col-lg-6">
+        <span class="eyebrow mb-3">3D printing studio · Mumbai</span>
+        <h1 class="mb-3">From your design to a finished part, <span class="text-primary">delivered to your door.</span></h1>
+        <p class="lead text-secondary mb-4">Upload an STL, STEP or a simple drawing. We check it, quote within one working day, print it on industrial machines, inspect every piece and ship it anywhere in India.</p>
+        <div class="d-flex flex-wrap gap-2 mb-4">
+          <a href="{% url 'orders:request_quote' %}" class="btn btn-primary btn-lg">Get a free quote <i class="bi bi-arrow-right"></i></a>
+          <a href="{% url 'catalog:list' %}" class="btn btn-light btn-lg border">Shop home decor</a>
+        </div>
+        <div class="d-flex flex-wrap gap-4 small text-secondary">
+          <span><i class="bi bi-shield-check text-primary me-1"></i>Your files stay confidential</span>
+          <span><i class="bi bi-receipt text-primary me-1"></i>GST invoice on every order</span>
+          <span><i class="bi bi-truck text-primary me-1"></i>Pan-India delivery</span>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="hero-card card p-4">
+          <div class="d-flex justify-content-between mb-3"><span class="order-no">AK-2610-00042</span><span class="status status-indigo">In production</span></div>
+          <h5 class="mb-1">Sensor housing × 500</h5>
+          <p class="text-muted small mb-4">Nylon PA12 · MJF · dispatch in 12 working days</p>
+          <ul class="tracker">
+            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Request</span></li>
+            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Quote</span></li>
+            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Payment</span></li>
+            <li class="current"><div class="dot"><i class="bi bi-printer"></i></div><span class="lbl">Production</span></li>
+            <li><div class="dot"></div><span class="lbl">Delivered</span></li>
+          </ul>
+          <p class="small text-muted mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Every order gets a live tracker like this one.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="py-5">
+  <div class="container">
+    <div class="text-center mb-5"><span class="eyebrow">What we print</span><h2 class="section-title">One studio, four kinds of work</h2></div>
+    <div class="row g-4">
+      {% for key, s in SEGMENT_INFO.items %}
+      <div class="col-md-6 col-xl-3">
+        <a href="{% url 'core:segment' key %}" class="card segment-card h-100 text-reset">
+          <div class="card-body">
+            <div class="feature-icon bg-soft-blue"><i class="bi bi-{{ s.icon }}"></i></div>
+            <h5>{{ s.title }}</h5>
+            <p class="text-secondary small">{{ s.blurb }}</p>
+            <ul class="list-unstyled small mb-3">{% for p in s.points %}<li class="mb-1"><i class="bi bi-check2 text-success me-1"></i>{{ p }}</li>{% endfor %}</ul>
+            <span class="small text-primary fw-semibold">Learn more <i class="bi bi-arrow-right"></i></span>
+          </div>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="py-5 bg-white border-top border-bottom">
+  <div class="container">
+    <div class="text-center mb-5"><span class="eyebrow">How it works</span><h2 class="section-title">Four simple steps</h2></div>
+    <div class="row g-4 steps">
+      <div class="col-md-3"><div class="step-no">1</div><h6>Send your design</h6><p class="small text-secondary">Upload 3D files or a drawing, or pick a ready design from the shop.</p></div>
+      <div class="col-md-3"><div class="step-no">2</div><h6>Approve the quote</h6><p class="small text-secondary">We review printability and send a clear price including GST and delivery.</p></div>
+      <div class="col-md-3"><div class="step-no">3</div><h6>Pay securely</h6><p class="small text-secondary">Pay by UPI or bank transfer to our company account. Large batches need only a 50% advance.</p></div>
+      <div class="col-md-3"><div class="step-no">4</div><h6>Track to delivery</h6><p class="small text-secondary">Follow printing, quality check and courier tracking from your account.</p></div>
+    </div>
+  </div>
+</section>
+
+{% if products %}
+<section class="py-5">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-end mb-4"><div><span class="eyebrow">Shop</span><h2 class="section-title mb-0">Ready to order</h2></div><a href="{% url 'catalog:list' %}" class="btn btn-outline-primary">View all</a></div>
+    <div class="row g-4">{% for p in products %}{% include "catalog/_product_card.html" %}{% endfor %}</div>
+  </div>
+</section>
+{% endif %}
+
+<section class="py-5">
+  <div class="container">
+    <div class="cta-band">
+      <div><h3 class="fw-bold mb-1">Have a part in mind?</h3><p class="mb-0">Send us the file today and get a quote within one working day. No account needed.</p></div>
+      <a href="{% url 'orders:request_quote' %}" class="btn btn-light btn-lg">Request a quote</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

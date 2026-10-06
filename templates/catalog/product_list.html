@@ -1,0 +1,22 @@
+{% extends SHELL %}
+{% block title %}Shop{% endblock %}
+{% block content %}
+<div class="{% if not user.is_authenticated %}container py-5{% endif %}">
+<div class="page-head"><div><h1>Shop</h1><p class="sub">Ready designs at fixed prices, printed to order. Want something unique? <a href="{% url 'orders:request_quote' %}">Request a custom quote</a>.</p></div>
+  <div class="d-flex gap-2">
+    <form class="d-flex gap-2">{% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}<input class="form-control" name="q" value="{{ q }}" placeholder="Search designs"><button class="btn btn-light border" aria-label="Search"><i class="bi bi-search"></i></button></form>
+    {% if user.is_owner %}<a href="{% url 'catalog:create' %}" class="btn btn-primary text-nowrap"><i class="bi bi-plus-lg"></i> Add product</a>{% endif %}
+  </div>
+</div>
+<div class="d-flex gap-2 mb-4 overflow-auto pb-1">
+  <a href="?" class="cat-pill {% if not active_category %}active{% endif %}">All</a>
+  {% for c in categories %}<a href="?category={{ c.slug }}" class="cat-pill {% if active_category == c.slug %}active{% endif %}"><i class="bi bi-{{ c.icon }}"></i> {{ c.name }}</a>{% endfor %}
+</div>
+<div class="row g-4">
+{% for p in products %}{% include "catalog/_product_card.html" %}
+{% empty %}
+  <div class="col-12"><div class="card"><div class="empty"><i class="bi bi-box-seam"></i>No designs here yet. <a href="{% url 'orders:request_quote' %}">Send us your idea</a> and we'll quote it.</div></div></div>
+{% endfor %}
+</div>
+</div>
+{% endblock %}

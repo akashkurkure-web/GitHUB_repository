@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Customers{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Customers</h1><p class="sub">{{ page.paginator.count }} customer{{ page.paginator.count|pluralize }}</p></div>
+<form class="d-flex gap-2"><input class="form-control" name="q" value="{{ q }}" placeholder="Name, email, company, phone"><button class="btn btn-light border">Search</button></form></div>
+<div class="card"><div class="table-responsive"><table class="table">
+  <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Orders</th><th>Joined</th></tr></thead>
+  <tbody>{% for c in page %}<tr><td>{{ c.display_name }}{% if not c.has_usable_password %} <span class="chip">No password yet</span>{% endif %}</td><td><a href="mailto:{{ c.email }}">{{ c.email }}</a></td><td>{{ c.phone }}</td><td>{{ c.company }}{% if c.gstin %}<div class="small text-muted">{{ c.gstin }}</div>{% endif %}</td><td><a href="{% url 'orders:list' %}?q={{ c.email|urlencode }}">{{ c.order_count }}</a>{% if c.open_count %} <span class="small text-muted">({{ c.open_count }} open)</span>{% endif %}</td><td>{{ c.date_joined|date:"d M Y" }}</td></tr>
+  {% empty %}<tr><td colspan="6"><div class="empty"><i class="bi bi-people"></i>No customers yet.</div></td></tr>{% endfor %}</tbody>
+</table></div>{% include "partials/_pagination.html" %}</div>
+{% endblock %}

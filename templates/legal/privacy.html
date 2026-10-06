@@ -1,0 +1,32 @@
+{% extends "legal/_layout.html" %}
+{% block title %}Privacy policy{% endblock %}
+{% block heading %}Privacy policy{% endblock %}
+{% block legal %}
+<p>This notice explains what personal data {{ COMPANY.legal_name|default:PORTAL_NAME }} collects, why, and your rights under the Digital Personal Data Protection Act, 2023 and the Information Technology Act, 2000.</p>
+<h5>1. What we collect</h5>
+<ul>
+  <li><strong>Account and contact details:</strong> name, email, mobile number, company name and GSTIN.</li>
+  <li><strong>Delivery details:</strong> recipient name, phone and address.</li>
+  <li><strong>Order details:</strong> files and drawings you upload, messages, quotes, invoices and payment references (UTR numbers and any screenshot you choose to upload). We do not collect card numbers, UPI PINs or bank passwords.</li>
+  <li><strong>Technical data:</strong> sign-in records and the IP address of failed sign-in attempts, kept for security.</li>
+</ul>
+<h5>2. Why we use it</h5>
+<p>To quote, make and deliver your orders, issue GST invoices, keep accounts as the law requires, answer your questions and complaints, and protect your account. We do not sell your data or use it for third-party advertising.</p>
+<h5>3. Who we share it with</h5>
+<ul>
+  <li><strong>Our production partner:</strong> the design files and specifications for your order, and the recipient name, phone and address needed to ship it. They do not receive your email address, company details or prices.</li>
+  <li><strong>Courier companies:</strong> delivery details.</li>
+  <li><strong>Service providers:</strong> our hosting, database and email providers, who process data on our instructions.</li>
+  <li><strong>Authorities:</strong> where the law requires, for example tax authorities.</li>
+</ul>
+<h5>4. How long we keep it</h5>
+<p>Order, invoice and payment records are kept for eight years, as the Companies Act, 2013 and GST law require. Design files are kept while your account is active so you can reorder, and you can ask us to delete them sooner. Failed sign-in records are deleted when you next sign in successfully.</p>
+<h5>5. Your rights</h5>
+<p>You can ask to see, correct or erase your personal data, withdraw consent, and nominate someone to exercise your rights. Write to {{ COMPANY.grievance_email|default:COMPANY.email }}. Records we must keep by law cannot be erased until the legal period ends. If you are not satisfied with our response you may complain to the Data Protection Board of India.</p>
+<h5>6. Cookies</h5>
+<p>We use only the cookies needed to keep you signed in and to protect forms (session and CSRF cookies). We do not use advertising or tracking cookies.</p>
+<h5>7. Security</h5>
+<p>Data is sent over HTTPS, passwords are stored as one-way hashes, accounts lock after repeated failed sign-ins, and access inside our team is limited by role.</p>
+<h5>8. Contact and grievance officer</h5>
+<p>{{ COMPANY.grievance_officer|default:"Grievance officer" }}, {{ COMPANY.legal_name|default:PORTAL_NAME }}, {{ COMPANY.address }}. Email: {{ COMPANY.grievance_email|default:COMPANY.email }}{% if COMPANY.grievance_phone %}, phone: {{ COMPANY.grievance_phone }}{% endif %}.</p>
+{% endblock %}

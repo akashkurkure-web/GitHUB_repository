@@ -1,0 +1,41 @@
+{% extends SHELL %}{% load humanize %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block content %}
+<div class="{% if not user.is_authenticated %}container py-5{% endif %}">
+<nav class="small mb-3"><a href="{% url 'catalog:list' %}">Shop</a> / <a href="{% url 'catalog:list' %}?category={{ product.category.slug }}">{{ product.category.name }}</a></nav>
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card overflow-hidden"><div class="product-img" style="aspect-ratio:1/1">{% if product.has_image %}<img src="{% url 'catalog:image' product.slug %}?v={{ product.updated_at|date:'U' }}" alt="{{ product.name }}">{% else %}<i class="bi bi-{{ product.category.icon }}" style="font-size:5rem"></i>{% endif %}</div></div>
+  </div>
+  <div class="col-lg-6">
+    {% if not product.is_active %}<div class="alert alert-warning py-2">Draft: customers cannot see this product until you tick <em>Published</em>.</div>{% endif %}
+    <h1 class="h3 fw-bold mb-1">{{ product.name }}</h1>
+    <p class="text-secondary">{{ product.short_description }}</p>
+    <div class="d-flex align-items-baseline gap-2 mb-3"><span class="price fs-3">{{ CURRENCY }}{{ product.price|floatformat:2|intcomma }}</span><span class="text-muted">per piece + GST · delivery included</span></div>
+    {% if user.is_owner %}<div class="alert alert-light border small py-2"><i class="bi bi-eye-slash me-1"></i>Owner view: vendor price {{ CURRENCY }}{{ product.vendor_price|floatformat:2|intcomma }}, our margin {{ CURRENCY }}{{ product.margin|floatformat:2|intcomma }} per piece. <a href="{% url 'catalog:edit' product.slug %}">Edit product</a></div>{% endif %}
+    <div class="mb-3">
+      {% if product.dimensions %}<span class="chip"><i class="bi bi-rulers"></i> {{ product.dimensions }}</span>{% endif %}
+      <span class="chip">{{ product.get_material_display }}</span>
+      <span class="chip"><i class="bi bi-clock"></i> Ships in {{ product.lead_time_days }} working days</span>
+      {% if product.min_quantity > 1 %}<span class="chip">Minimum {{ product.min_quantity }} pieces</span>{% endif %}
+    </div>
+    {% if product.description %}<p>{{ product.description|linebreaksbr }}</p>{% endif %}
+
+    {% if form %}
+      <a href="{% url 'orders:create_catalog' product.slug %}" class="btn btn-primary btn-lg"><i class="bi bi-bag-check"></i> Order now</a>
+    {% elif not user.is_authenticated %}
+      <div class="card"><div class="card-body">
+        <p class="mb-2">Sign in or create a free account to order. It takes a minute.</p>
+        <a href="{% url 'accounts:signup' %}?next={% url 'orders:create_catalog' product.slug %}" class="btn btn-primary">Create account and order</a>
+        <a href="{% url 'accounts:login' %}?next={% url 'orders:create_catalog' product.slug %}" class="btn btn-outline-primary">Sign in</a>
+      </div></div>
+    {% endif %}
+    <p class="small text-muted mt-3 mb-0"><i class="bi bi-palette me-1"></i>Need a different size, colour or your own text? <a href="{% url 'orders:request_quote' %}?segment=custom">Ask for a custom version</a>.</p>
+  </div>
+</div>
+{% if related %}
+<h5 class="mt-5 mb-3">You may also like</h5>
+<div class="row g-4">{% for p in related %}{% include "catalog/_product_card.html" %}{% endfor %}</div>
+{% endif %}
+</div>
+{% endblock %}

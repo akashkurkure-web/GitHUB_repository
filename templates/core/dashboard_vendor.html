@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Production dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Production</h1><p class="sub">Jobs from {{ PORTAL_NAME }}. Customer details and prices are kept with our team; you see what you need to make and ship.</p></div></div>
+<div class="row g-4 mb-4">
+  {% if user.vendor_manager %}<div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-amber"><i class="bi bi-calculator"></i></div><div><div class="value">{{ kpi_pricing }}</div><div class="label">Price requests</div></div></div></div>{% endif %}
+  <div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-blue"><i class="bi bi-inbox"></i></div><div><div class="value">{{ kpi_new }}</div><div class="label">New jobs</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-purple"><i class="bi bi-printer"></i></div><div><div class="value">{{ kpi_production }}</div><div class="label">In production</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-teal"><i class="bi bi-box-seam"></i></div><div><div class="value">{{ kpi_ready }}</div><div class="label">Packed, to ship</div></div></div></div>
+  {% if user.vendor_manager %}<div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-green"><i class="bi bi-currency-rupee"></i></div><div><div class="value">{{ CURRENCY }}{{ month_payable|floatformat:0|intcomma }}</div><div class="label">Delivered this month</div></div></div></div>{% endif %}
+</div>
+{% if user.vendor_manager and pricing %}<div class="card mb-4"><div class="card-header">Price requests</div>{% include "partials/_order_table.html" with orders=pricing %}</div>{% endif %}
+<div class="card mb-4"><div class="card-header">New jobs to start</div>{% include "partials/_order_table.html" with orders=new_jobs %}</div>
+<div class="card mb-4"><div class="card-header">In progress</div>{% include "partials/_order_table.html" with orders=active %}</div>
+<div class="card"><div class="card-header">Recently shipped</div>{% include "partials/_order_table.html" with orders=recent_shipped %}</div>
+{% endblock %}

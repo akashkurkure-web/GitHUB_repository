@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% load humanize %}
+{% block title %}Monthly statement{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{% if user.is_owner %}Vendor settlement{% else %}Monthly statement{% endif %}</h1><p class="sub">{{ vendor.company_name }} · orders delivered in {{ start|date:"F Y" }}. Payment due by {{ pay_by|date:"d M Y" }}{% if vendor.udyam_number %} (MSME: within 45 days of acceptance){% endif %}.</p></div>
+  <form class="d-flex gap-2">
+    {% if vendors %}<select name="vendor" class="form-select">{% for v in vendors %}<option value="{{ v.pk }}" {% if v.pk == vendor.pk %}selected{% endif %}>{{ v.company_name }}</option>{% endfor %}</select>{% endif %}
+    <select name="month" class="form-select" onchange="this.form.submit()">{% for m in months %}<option value="{{ m|date:'Y-m' }}" {% if m == start %}selected{% endif %}>{{ m|date:"F Y" }}</option>{% endfor %}</select>
+    <button class="btn btn-light border">Show</button>
+    <a href="?month={{ start|date:'Y-m' }}&vendor={{ vendor.pk }}&format=csv" class="btn btn-outline-primary text-nowrap"><i class="bi bi-download"></i> CSV</a>
+  </form>
+</div>
+<div class="row g-4 mb-4">
+  <div class="col-md-4"><div class="card kpi"><div class="icon bg-soft-blue"><i class="bi bi-box-seam"></i></div><div><div class="value">{{ orders|length }}</div><div class="label">Orders delivered</div></div></div></div>
+  <div class="col-md-4"><div class="card kpi"><div class="icon bg-soft-amber"><i class="bi bi-currency-rupee"></i></div><div><div class="value">{{ CURRENCY }}{{ vendor_total|floatformat:0|intcomma }}</div><div class="label">Payable to vendor</div></div></div></div>
+  <div class="col-md-4"><div class="card kpi"><div class="icon {% if due > 0 %}bg-soft-red{% else %}bg-soft-green{% endif %}"><i class="bi bi-wallet2"></i></div><div><div class="value">{{ CURRENCY }}{{ due|floatformat:0|intcomma }}</div><div class="label">Still to pay (paid {{ CURRENCY }}{{ paid|floatformat:0|intcomma }})</div></div></div></div>
+</div>
+<div class="row g-4">
+  <div class="{% if user.is_owner %}col-xl-8{% else %}col-12{% endif %}"><div class="card"><div class="table-responsive"><table class="table">
+    <thead><tr><th>Order</th><th>Item</th><th class="text-end">Qty</th><th>Delivered</th><th class="text-end">Vendor price</th>{% if user.is_owner %}<th class="text-end">Our price</th><th class="text-end">Margin</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for o in orders %}<tr><td><a class="order-no" href="{{ o.get_absolute_url }}">{{ o.number }}</a></td><td>{{ o.title|truncatechars:40 }}</td><td class="text-end">{{ o.quantity }}</td><td>{{ o.delivered_at|date:"d M" }}</td><td class="text-end">{{ CURRENCY }}{{ o.vendor_price|floatformat:2|intcomma }}</td>{% if user.is_owner %}<td class="text-end">{{ CURRENCY }}{{ o.price|floatformat:2|intcomma }}</td><td class="text-end text-success">{{ CURRENCY }}{{ o.margin|floatformat:2|intcomma }}</td>{% endif %}</tr>
+    {% empty %}<tr><td colspan="7"><div class="empty"><i class="bi bi-calendar-x"></i>No deliveries in this month.</div></td></tr>{% endfor %}
+    </tbody>
+    {% if orders %}<tfoot><tr class="fw-bold"><td colspan="4">Total</td><td class="text-end">{{ CURRENCY }}{{ vendor_total|floatformat:2|intcomma }}</td>{% if user.is_owner %}<td class="text-end">{{ CURRENCY }}{{ our_total|floatformat:2|intcomma }}</td><td></td>{% endif %}</tr></tfoot>{% endif %}
+  </table></div></div>
+  {% if payouts %}<div class="card mt-4"><div class="card-header">Payments made for {{ start|date:"F Y" }}</div><div class="table-responsive"><table class="table"><thead><tr><th>Paid on</th><th>Reference</th><th>Vendor invoice</th><th class="text-end">Amount</th></tr></thead><tbody>
+    {% for p in payouts %}<tr><td>{{ p.paid_on|date:"d M Y" }}</td><td>{{ p.reference }}</td><td>{{ p.vendor_invoice_number|default:"—" }}</td><td class="text-end">{{ CURRENCY }}{{ p.amount|floatformat:2|intcomma }}</td></tr>{% endfor %}
+  </tbody></table></div></div>{% endif %}
+  </div>
+  {% if user.is_owner %}
+  <div class="col-xl-4"><div class="card"><div class="card-header">Record payment to vendor</div><div class="card-body">
+    <p class="small text-muted">Ask the vendor for one GST invoice for the month's total, pay it by bank transfer, then record it here.</p>
+    <form method="post" novalidate>{% csrf_token %}{% for field in form %}{% include "partials/_field.html" %}{% endfor %}<button class="btn btn-primary">Save payment</button></form>
+  </div></div></div>
+  {% endif %}
+</div>
+{% endblock %}

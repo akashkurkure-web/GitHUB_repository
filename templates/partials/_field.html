@@ -1,0 +1,15 @@
+{% if field.field.widget.input_type == "checkbox" and not field.field.widget.allow_multiple_selected %}
+<div class="form-check mb-3">
+  {{ field }}
+  <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+  {% for e in field.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+</div>
+{% else %}
+<div class="mb-3 {% if field.field.widget.input_type == 'checkbox' %}check-grid{% endif %}">
+  {% if field.label %}<label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</label>{% endif %}
+  {% if field.errors %}<div class="is-invalid-wrap">{{ field }}</div>{% else %}{{ field }}{% endif %}
+  {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+  {% for e in field.errors %}<div class="text-danger small mt-1">{{ e }}</div>{% endfor %}
+</div>
+{% endif %}

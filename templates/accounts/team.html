@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Team and logins{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Team and logins</h1><p class="sub">Staff and vendor logins are created here only. Nobody can sign up as staff or vendor.</p></div></div>
+<div class="row g-4">
+  <div class="col-xl-7"><div class="card"><div class="table-responsive"><table class="table">
+    <thead><tr><th>Name</th><th>Access</th><th>Email</th><th></th></tr></thead>
+    <tbody>{% for p in people %}<tr class="{% if not p.is_active %}text-muted{% endif %}"><td>{{ p.display_name }}</td><td>{{ p.role_label }}{% if p.vendor %}<div class="small text-muted">{{ p.vendor.company_name }}</div>{% endif %}</td><td>{{ p.email }}</td>
+      <td class="text-end">{% if p != user %}<form method="post" action="{% url 'accounts:team_toggle' p.pk %}">{% csrf_token %}<button class="btn btn-sm {% if p.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %}">{% if p.is_active %}Deactivate{% else %}Reactivate{% endif %}</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+  <div class="card mt-4"><div class="card-body small">
+    <h6>Who sees what</h6>
+    <ul class="mb-0">
+      <li><strong>Owner:</strong> everything, including vendor prices, margin, payment approval, vendor settlement and database admin.</li>
+      <li><strong>Sales and ops:</strong> requests, quotes, orders, customers, complaints; can record payments but not approve them; never sees vendor prices or margin.</li>
+      <li><strong>Vendor manager:</strong> their jobs, enters vendor prices, monthly statement; sees no customer email, company or selling price.</li>
+      <li><strong>Vendor staff:</strong> production and dispatch for their jobs; no prices at all.</li>
+    </ul>
+  </div></div></div>
+  <div class="col-xl-5"><div class="card"><div class="card-header">Create a login</div><div class="card-body">
+    <form method="post" novalidate>{% csrf_token %}
+      <div class="row"><div class="col-6">{% include "partials/_field.html" with field=form.first_name %}</div><div class="col-6">{% include "partials/_field.html" with field=form.last_name %}</div></div>
+      {% include "partials/_field.html" with field=form.email %}
+      {% include "partials/_field.html" with field=form.phone %}
+      {% include "partials/_field.html" with field=form.kind %}
+      {% include "partials/_field.html" with field=form.vendor %}
+      {% include "partials/_field.html" with field=form.password %}
+      <button class="btn btn-primary">Create login</button>
+    </form>
+  </div></div></div>
+</div>
+{% endblock %}
