@@ -234,6 +234,37 @@ test('my account: change password; move the code to a new phone', async () => {
   await signIn(client(), 'neha@shop.in', 'nehapass34');
 });
 
+test('forgot password: owners use their reset key; staff cannot; a used key is replaced', async () => {
+  const c = client();
+  await signIn(c, 'admin@bazaario.local', 'AdminPass123');
+  assert.equal((await c.call('GET', '/admin/auth/security')).data.hasResetKey, false);
+  assert.equal((await c.call('POST', '/admin/auth/reset-key', { password: 'wrong' })).status, 400);
+  const made = await c.call('POST', '/admin/auth/reset-key', { password: 'AdminPass123' });
+  assert.match(made.data.resetKey, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$/);
+  assert.equal((await c.call('GET', '/admin/auth/security')).data.hasResetKey, true);
+
+  const f = client();
+  assert.equal((await f.call('POST', '/admin/auth/forgot', { email: 'admin@bazaario.local', resetKey: 'AAAA-BBBB-CCCC-DDDD', newPassword: 'NewOwner123' })).status, 400);
+  assert.equal((await f.call('POST', '/admin/auth/forgot', { email: 'admin@bazaario.local', resetKey: made.data.resetKey, newPassword: 'short' })).status, 400);
+  const ok = await f.call('POST', '/admin/auth/forgot', { email: 'Admin@Bazaario.local', resetKey: made.data.resetKey.toLowerCase(), newPassword: 'NewOwner123' });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.user.staffRole, 'owner', 'signed in with the new password');
+  assert.notEqual(ok.data.resetKey, made.data.resetKey, 'a new key replaces the used one');
+  assert.equal((await f.call('GET', '/admin/stats')).status, 200);
+  assert.equal((await c.call('GET', '/admin/stats')).status, 401, 'other sessions are signed out');
+  assert.equal((await client().call('POST', '/admin/auth/forgot', { email: 'admin@bazaario.local', resetKey: made.data.resetKey, newPassword: 'Another123' })).status, 400, 'the old key no longer works');
+  assert.equal((await client().call('POST', '/admin/auth/login', { email: 'admin@bazaario.local', password: 'NewOwner123' })).status, 200);
+
+  // Staff (not owners) cannot make or use a reset key.
+  const m = client();
+  await signIn(m, 'neha@shop.in', 'nehapass34');
+  assert.equal((await m.call('POST', '/admin/auth/reset-key', { password: 'nehapass34' })).status, 403);
+  // Too many wrong keys lock the account like wrong passwords.
+  for (let i = 0; i < 5; i++) await client().call('POST', '/admin/auth/forgot', { email: 'admin@bazaario.local', resetKey: 'AAAA-BBBB-CCCC-DDDD', newPassword: 'NewOwner123' });
+  assert.equal((await client().call('POST', '/admin/auth/forgot', { email: 'admin@bazaario.local', resetKey: ok.data.resetKey, newPassword: 'NewOwner123' })).status, 423);
+  db.get().prepare("UPDATE users SET locked_until = 0, failed_logins = 0 WHERE email = 'admin@bazaario.local'").run();
+});
+
 test('existing admins become owners when the database is upgraded', () => {
   const file = require('node:path').join(require('node:os').tmpdir(), `bz-migrate-${process.pid}.db`);
   db.close();

@@ -592,6 +592,8 @@ const ADDED_COLUMNS = [
   ['users', 'recovery_codes', "TEXT NOT NULL DEFAULT '[]'"],
   ['users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'last_admin_login', 'INTEGER'],
+  // Owner reset key: lets an owner who forgot their password set a new one without email (only its hash is kept).
+  ['users', 'reset_key_hash', 'TEXT'],
   // Admin sessions are separate from shopping sessions and end after a spell of inactivity.
   ['sessions', 'admin_ok', 'INTEGER NOT NULL DEFAULT 0'],
   ['sessions', 'last_active', 'INTEGER NOT NULL DEFAULT 0'],

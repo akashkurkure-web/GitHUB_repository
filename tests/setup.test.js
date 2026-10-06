@@ -41,6 +41,7 @@ test('owner setup: the first visit to /admin creates the owner, then setup close
   const r = await call('POST', '/admin/auth/setup', { name: 'Akash', email: 'Owner@Shop.in', password: 'ownerpass1' }, owner);
   assert.equal(r.status, 201);
   assert.equal(r.data.user.staffRole, 'owner', 'signed in straight away');
+  assert.match(r.data.resetKey, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$/, 'the owner gets a reset key to save');
   assert.equal((await call('GET', '/admin/products', undefined, owner)).status, 200);
 
   assert.equal((await call('GET', '/auth/setup')).data.needed, false);

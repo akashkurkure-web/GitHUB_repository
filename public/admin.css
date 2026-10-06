@@ -71,6 +71,8 @@ body.adm { background: var(--paper); min-height: 100vh; }
 .adm-codes code, .adm-secret { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 14px; letter-spacing: .06em; }
 .adm-secret { display: inline-block; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; margin: 4px 0; overflow-wrap: anywhere; user-select: all; }
 .adm-code { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 22px; letter-spacing: .4em; text-align: center; height: 48px; }
+.adm-key { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.adm-key-show { display: block; text-align: center; font-size: 18px; padding: 10px; margin: 6px 0 2px; }
 .adm-code-rc { letter-spacing: .15em; font-size: 18px; text-transform: uppercase; }
 
 /* ---------- Sign-in screens ---------- */

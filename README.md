@@ -154,7 +154,7 @@ npm install
 ```bash
 npm start
 ```
-**First visit: create your owner account.** Open <http://localhost:3000/admin>. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you are in. This happens only once; do it right after deploying, before you share the link. After that, sign in at `/admin` with your email and password.
+**First visit: create your owner account.** Open <http://localhost:3000/admin>. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you are in. It then shows your **owner reset key** once: Copy or Download it and keep it safe. This happens only once; do it right after deploying, before you share the link. After that, sign in at `/admin` with your email and password.
 
 *Optional extra safety:* Admin portal → **My account → Sign-in code → Turn on** adds a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator or Authy) to each sign-in, with 10 recovery codes for a lost phone.
 *Optional:* to create the owner from the command line instead, start with `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start`.
@@ -172,6 +172,7 @@ npm start
 | Support | Dashboard, orders (read only), returns, help desk, customers, messages sent |
 
 **Forgotten password or lost phone**
+- Owner: on the sign-in page choose **Forgot password?**, then enter your email, your owner reset key and a new password. Lost the key? While signed in, **My account → Owner reset key → Create a new reset key**.
 - Staff: the owner opens **Staff and roles → Reset access**. The person gets a new temporary password (and their sign-in code, if on, is turned off).
 - Owner with the sign-in code on: sign in with a saved recovery code, then **My account → Sign-in code → Set up a new phone**.
 - Tip: add a second owner, so one can always reset the other.
@@ -184,7 +185,7 @@ npm start
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
 
 **Reset demo data:** stop the server, then `npm run seed` (or delete the `data/` folder).
-**Run automated tests:** `npm test` (51 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders, marketplace, Express, growth and the admin portal).
+**Run automated tests:** `npm test` (52 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders, marketplace, Express, growth and the admin portal).
 
 ---
 

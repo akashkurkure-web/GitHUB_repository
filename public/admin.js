@@ -120,7 +120,49 @@ function viewSignIn(notice) {
         if (r.user) startPortal(r); else viewCode(r);
       } catch (ex) { showErr(err, ex.message); btn.disabled = false; pw.value = ''; pw.focus(); }
     } }, field('Email', email), field('Password', pw), btn),
-    h('p', { class: 'hint adm-center' }, 'Forgot your password? Ask the store owner to reset your access.'));
+    h('p', { class: 'adm-center' }, h('button', { type: 'button', class: 'link-btn', onclick: () => viewForgot(email.value) }, 'Forgot password?')));
+}
+
+/** Owners set a new password with the reset key they saved at setup; staff ask an owner. */
+function viewForgot(prefill = '') {
+  const email = h('input', { type: 'email', required: true, autocomplete: 'username', maxLength: 254, value: prefill });
+  const key = h('input', { required: true, maxLength: 24, autocomplete: 'off', placeholder: 'XXXX-XXXX-XXXX-XXXX', class: 'adm-key' });
+  const npw = h('input', { type: 'password', required: true, minLength: 8, maxLength: 128, autocomplete: 'new-password' });
+  const npw2 = h('input', { type: 'password', required: true, autocomplete: 'new-password' });
+  const err = errBox();
+  const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Set new password and sign in');
+  showGate(h('h1', null, 'Forgot password'),
+    h('p', { class: 'muted' }, 'Store owner: enter the owner reset key you saved when you set up the store (or created under My account).'),
+    h('div', { class: 'alert alert-test' }, 'Staff members: ask the store owner to open Staff and roles and choose Reset access.'), err,
+    h('form', { onsubmit: async (e) => {
+      e.preventDefault(); err.classList.add('hidden');
+      if (npw.value !== npw2.value) return showErr(err, 'The new passwords do not match.');
+      btn.disabled = true;
+      try {
+        const r = await api('POST', '/admin/auth/forgot', { email: email.value, resetKey: key.value, newPassword: npw.value });
+        startPortal(r);
+        showResetKey(r.resetKey, 'Password changed. Save your new reset key', 'Your old reset key has been used up. This new one replaces it.');
+      } catch (ex) { showErr(err, ex.message); btn.disabled = false; }
+    } }, field('Email', email), field('Owner reset key', key), field('New password', npw, 'At least 8 characters, with letters and numbers.'),
+    field('Re-enter new password', npw2), btn),
+    h('p', { class: 'adm-center' }, h('button', { type: 'button', class: 'link-btn', onclick: () => viewSignIn() }, 'Back to sign in')));
+}
+
+/** Shows an owner reset key once, with Copy and Download. */
+function showResetKey(key, title = 'Save your owner reset key', note = 'If you ever forget your password, this key lets you set a new one from "Forgot password?" on the sign-in page. It is shown only now.') {
+  const modal = $('#modal');
+  const text = `Bazaario Admin owner reset key\nSign-in page: ${location.origin}/admin → Forgot password?\nReset key: ${key}\n`;
+  const download = () => {
+    const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: 'text/plain' })), download: 'bazaario-admin-reset-key.txt' });
+    document.body.append(a); a.click(); a.remove();
+  };
+  $('#modal-body').replaceChildren(h('h3', null, title), h('p', { class: 'muted small' }, note),
+    h('code', { class: 'adm-secret adm-key-show' }, key),
+    h('div', { class: 'adm-row' },
+      h('button', { class: 'btn btn-outline', onclick: () => navigator.clipboard.writeText(text).then(() => toast('Reset key copied.'), () => toast('Copy did not work. Please download it instead.', true)) }, 'Copy'),
+      h('button', { class: 'btn btn-outline', onclick: download }, 'Download .txt'),
+      h('button', { class: 'btn btn-primary', onclick: () => modal.close() }, 'I have saved it')));
+  modal.showModal();
 }
 
 function viewSetup() {
@@ -137,8 +179,9 @@ function viewSetup() {
       if (pw.value !== pw2.value) return showErr(err, 'Passwords do not match.');
       btn.disabled = true;
       try {
-        startPortal(await api('POST', '/admin/auth/setup', { name: name.value, email: email.value, password: pw.value }));
-        toast('Your store is ready. Welcome to Bazaario Admin!');
+        const r = await api('POST', '/admin/auth/setup', { name: name.value, email: email.value, password: pw.value });
+        startPortal(r);
+        showResetKey(r.resetKey, 'Your store is ready. Save your owner reset key');
       } catch (ex) { showErr(err, ex.message); btn.disabled = false; }
     } }, field('Your name', name), field('Email', email), field('Password', pw, 'At least 8 characters, with letters and numbers.'),
     field('Re-enter password', pw2), btn));
@@ -352,7 +395,33 @@ async function adminAccount(body) {
         } catch (ex) { fail(ex); }
       } }, field('Current password', cur), field('New password', npw, 'At least 8 characters, with letters and numbers.'), field('Re-enter new password', npw2),
       h('button', { class: 'btn btn-primary' }, 'Change password'))),
-    h('div', { class: 'card' }, h('h3', null, 'Sign-in code (optional)'), twoStepCard(sec))));
+    h('div', { class: 'card' }, h('h3', null, 'Sign-in code (optional)'), twoStepCard(sec)),
+    u.staffRole === 'owner' ? h('div', { class: 'card' }, h('h3', null, 'Owner reset key'), resetKeyCard(sec)) : null));
+}
+
+/** Owners: the key that sets a new password from "Forgot password?" without email. */
+function resetKeyCard(sec) {
+  const box = h('div');
+  const rest = () => fill(box,
+    h('p', null, sec.hasResetKey ? h('span', { class: 'ok' }, 'Saved.') : h('span', { class: 'err' }, 'Not created yet.'),
+      ' Lets you set a new password from "Forgot password?" on the sign-in page.'),
+    h('p', { class: 'hint' }, sec.hasResetKey ? 'Lost it? Create a new one; the old key stops working.' : 'Create one now and keep it somewhere safe.'),
+    h('button', { class: 'btn btn-outline', onclick: ask }, sec.hasResetKey ? 'Create a new reset key' : 'Create a reset key'));
+  const ask = () => {
+    const pw = h('input', { type: 'password', required: true, autocomplete: 'current-password', maxLength: 128 });
+    fill(box, h('form', { onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api('POST', '/admin/auth/reset-key', { password: pw.value });
+        sec.hasResetKey = true; rest();
+        showResetKey(r.resetKey);
+      } catch (ex) { fail(ex); }
+    } }, field('Your password', pw), h('div', { class: 'adm-row' }, h('button', { class: 'btn btn-outline' }, 'Create key'),
+      h('button', { type: 'button', class: 'btn btn-ghost', onclick: rest }, 'Cancel'))));
+    pw.focus();
+  };
+  rest();
+  return box;
 }
 
 /**

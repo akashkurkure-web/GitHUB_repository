@@ -51,6 +51,17 @@ function newRecoveryCodes() {
   return { codes, hashes: codes.map((c) => sha256(c.replace('-', ''))) };
 }
 
+/** Owner reset key, like K7QM-2XPA-9RTD-HB4E (80 random bits). Saved by the owner; only its hash is kept. */
+const newResetKey = () => totp.base32Encode(crypto.randomBytes(10)).replace(/(.{4})(?=.)/g, '$1-');
+// Typed keys forgive look-alikes (0 for O, 1 for I, 8 for B), spaces and dashes.
+const resetKeyHash = (key) => sha256(String(key).toUpperCase().replace(/0/g, 'O').replace(/1/g, 'I').replace(/8/g, 'B').replace(/[^A-Z2-7]/g, ''));
+
+function issueResetKey(userId) {
+  const key = newResetKey();
+  db.get().prepare('UPDATE users SET reset_key_hash = ? WHERE id = ?').run(resetKeyHash(key), userId);
+  return key;
+}
+
 /** A temporary password for new staff: 12 letters and numbers, changed at first sign-in. */
 const tempPassword = () => `${totp.base32Encode(crypto.randomBytes(6)).slice(0, 4)}-${crypto.randomInt(1000, 10000)}-${totp.base32Encode(crypto.randomBytes(6)).slice(0, 4).toLowerCase()}`;
 
@@ -111,7 +122,9 @@ router.post('/setup', limiter, async (req, res) => {
   });
   req.user = user;
   audit(req, 'owner.setup');
-  res.status(201).json(openSession(req, res, user, 'password'));
+  const out = openSession(req, res, user, 'password');
+  out.resetKey = issueResetKey(user.id);
+  res.status(201).json(out);
 });
 
 router.post('/login', limiter, async (req, res) => {
@@ -203,8 +216,44 @@ router.post('/password', limiter, requireAdminSession, (req, res) => {
 });
 
 router.get('/security', requireAdminSession, (req, res) => {
-  const u = db.get().prepare('SELECT totp_secret, recovery_codes, last_admin_login FROM users WHERE id = ?').get(req.user.id);
-  res.json({ twoStep: !!u.totp_secret, recoveryCodesLeft: JSON.parse(u.recovery_codes || '[]').length, lastSignIn: u.last_admin_login });
+  const u = db.get().prepare('SELECT totp_secret, recovery_codes, last_admin_login, reset_key_hash FROM users WHERE id = ?').get(req.user.id);
+  res.json({ twoStep: !!u.totp_secret, recoveryCodesLeft: JSON.parse(u.recovery_codes || '[]').length, lastSignIn: u.last_admin_login, hasResetKey: !!u.reset_key_hash });
+});
+
+// Forgot password (owners): the saved owner reset key sets a new password, with no email needed. Staff ask an
+// owner to reset their access instead. Wrong keys count towards the same lockout as wrong passwords.
+router.post('/forgot', limiter, (req, res) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const key = typeof req.body.resetKey === 'string' ? req.body.resetKey : '';
+  const wrong = new HttpError(400, 'That email and reset key do not match. Staff members: ask the store owner to reset your access.');
+  const pwErr = passwordPolicyError(req.body.newPassword);
+  if (pwErr) throw new HttpError(400, pwErr);
+  const user = email ? db.get().prepare("SELECT * FROM users WHERE email = ? AND role = 'admin'").get(email) : null;
+  if (!user || !user.reset_key_hash || (user.staff_role || 'owner') !== 'owner') { resetKeyHash(key); throw wrong; }
+  if (user.locked_until > Date.now()) throw new HttpError(423, 'This account is temporarily locked after too many failed attempts. Try again later.');
+  const ok = crypto.timingSafeEqual(Buffer.from(resetKeyHash(key)), Buffer.from(user.reset_key_hash));
+  if (!ok) {
+    const failed = user.failed_logins + 1;
+    const lock = failed >= config.maxFailedLogins ? Date.now() + config.lockoutMs : 0;
+    db.get().prepare('UPDATE users SET failed_logins = ?, locked_until = ? WHERE id = ?').run(lock ? 0 : failed, lock, user.id);
+    audit(req, 'admin.reset_key_failed', { userId: user.id });
+    throw wrong;
+  }
+  db.get().prepare('UPDATE users SET password_hash = ?, must_change_password = 0, failed_logins = 0, locked_until = 0 WHERE id = ?')
+    .run(hashPassword(req.body.newPassword), user.id);
+  destroyAllSessions(user.id);
+  req.user = user;
+  audit(req, 'admin.password_reset_with_key');
+  const out = openSession(req, res, user, 'reset key');
+  out.resetKey = issueResetKey(user.id); // the used key is replaced, so it cannot be used again
+  res.json(out);
+});
+
+router.post('/reset-key', limiter, requireAdminSession, (req, res) => {
+  if (req.user.staffRole !== 'owner') throw new HttpError(403, 'Only owners have a reset key. Staff ask an owner to reset their access.');
+  confirmPassword(req);
+  audit(req, 'admin.reset_key_created');
+  res.json({ resetKey: issueResetKey(req.user.id) });
 });
 
 router.post('/recovery-codes', limiter, requireAdminSession, (req, res) => {
@@ -320,7 +369,7 @@ staffRouter.patch('/:id', (req, res) => {
 staffRouter.post('/:id/reset', (req, res) => {
   const u = staffMember(req);
   const password = tempPassword();
-  db.get().prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, totp_secret = NULL, totp_last_step = 0,
+  db.get().prepare(`UPDATE users SET password_hash = ?, must_change_password = 1, totp_secret = NULL, totp_last_step = 0, reset_key_hash = NULL,
     recovery_codes = '[]', failed_logins = 0, locked_until = 0 WHERE id = ?`).run(hashPassword(password), u.id);
   destroyAllSessions(u.id);
   audit(req, 'staff.reset', { staffId: u.id });
@@ -330,7 +379,7 @@ staffRouter.post('/:id/reset', (req, res) => {
 // Removing someone ends their sessions at once; their account stays as an ordinary shopping account.
 staffRouter.delete('/:id', (req, res) => {
   const u = staffMember(req);
-  db.get().prepare(`UPDATE users SET role = 'customer', staff_role = NULL, totp_secret = NULL, totp_last_step = 0, recovery_codes = '[]',
+  db.get().prepare(`UPDATE users SET role = 'customer', staff_role = NULL, totp_secret = NULL, totp_last_step = 0, recovery_codes = '[]', reset_key_hash = NULL,
     must_change_password = 0 WHERE id = ?`).run(u.id);
   destroyAllSessions(u.id);
   audit(req, 'staff.removed', { staffId: u.id, email: u.email });
