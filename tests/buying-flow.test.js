@@ -10,6 +10,7 @@ const db = require('../src/db');
 const { seed } = require('../src/seed');
 const delivery = require('../src/delivery');
 const { createApp } = require('../server');
+const { signInAdmin } = require('./admin-signin');
 
 let server;
 let base;
@@ -41,7 +42,7 @@ function client() {
     if (data.csrfToken) csrf = data.csrfToken;
     return { status: res.status, data };
   };
-  return { call };
+  return { call, get cookie() { return cookie; }, set cookie(v) { cookie = v; }, set csrf(v) { csrf = v; } };
 }
 
 let n = 0;
@@ -58,7 +59,7 @@ async function address(c, pincode = '411001') {
 }
 async function admin() {
   const a = client();
-  assert.equal((await a.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' })).status, 200);
+  await signInAdmin(a);
   return a;
 }
 const ship = async (a, id, steps) => {
@@ -249,7 +250,7 @@ test('help centre: tickets, Studio replies, grievance acknowledged with a 30-day
   assert.equal(t.messages.length, 2, 'automatic acknowledgement');
   assert.ok(t.due_at - Date.now() <= 24 * 3600_000);
   assert.equal((await other.call('GET', `/tickets/${t.id}`)).status, 404, 'no peeking at other buyers');
-  assert.equal((await c.call('GET', '/admin/tickets')).status, 403);
+  assert.equal((await c.call('GET', '/admin/tickets')).status, 401);
 
   const reply = await a.call('POST', `/admin/tickets/${t.id}/reply`, { message: 'It is out for delivery today.' });
   assert.equal(reply.data.ticket.status, 'answered');

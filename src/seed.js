@@ -264,9 +264,9 @@ function seed({ reset = false, log = console.log } = {}) {
     for (const c of COUPONS) insCoupon.run(...c);
 
     // With ADMIN_PASSWORD set, the owner account is created up front. Without it, the store opens with
-    // no owner and the first visit to Sign in asks the owner to create their account (POST /api/auth/setup).
+    // no owner and the first visit to /admin asks the owner to create their account (POST /api/admin/auth/setup).
     if (config.adminPassword) {
-      d.prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?,?,?,?,?)')
+      d.prepare("INSERT INTO users (name, email, password_hash, role, staff_role, created_at) VALUES (?,?,?,?,'owner',?)")
         .run('Store Admin', config.adminEmail, hashPassword(config.adminPassword), 'admin', now);
     }
   });

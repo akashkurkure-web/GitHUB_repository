@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+-- Admin sign-in step 2: after the password is right, the one-time code is checked against this short-lived challenge.
+CREATE TABLE IF NOT EXISTS admin_challenges (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pending_secret TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,
@@ -575,6 +584,19 @@ const ADDED_COLUMNS = [
   ['orders', 'plus', 'INTEGER NOT NULL DEFAULT 0'],
   ['orders', 'plus_saved', 'INTEGER NOT NULL DEFAULT 0'],
   ['payouts', 'ad_spend', 'INTEGER NOT NULL DEFAULT 0'],
+  // Admin portal: staff role (owner, manager, support), authenticator app secret and its last used step,
+  // hashed recovery codes, a first-sign-in password change, and when the person last signed in to the portal.
+  ['users', 'staff_role', 'TEXT'],
+  ['users', 'totp_secret', 'TEXT'],
+  ['users', 'totp_last_step', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'recovery_codes', "TEXT NOT NULL DEFAULT '[]'"],
+  ['users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'last_admin_login', 'INTEGER'],
+  // Owner reset key: lets an owner who forgot their password set a new one without email (only its hash is kept).
+  ['users', 'reset_key_hash', 'TEXT'],
+  // Admin sessions are separate from shopping sessions and end after a spell of inactivity.
+  ['sessions', 'admin_ok', 'INTEGER NOT NULL DEFAULT 0'],
+  ['sessions', 'last_active', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /** Brings databases created by older versions up to the current schema. */
@@ -673,6 +695,8 @@ function migrate(d) {
     const have = d.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
     if (!have.includes(col)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
   }
+  // Admins from before staff roles ran the store, so they become its owners.
+  if (exists('users')) d.exec("UPDATE users SET staff_role = 'owner' WHERE role = 'admin' AND staff_role IS NULL");
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_id)');
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_checkout ON orders(checkout_ref)');
   d.exec('CREATE INDEX IF NOT EXISTS idx_orders_rider ON orders(rider_id)');

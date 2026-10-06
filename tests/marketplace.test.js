@@ -11,6 +11,7 @@ const { seed } = require('../src/seed');
 const kyc = require('../src/kyc');
 const routing = require('../src/routing');
 const { createApp } = require('../server');
+const { signInAdmin } = require('./admin-signin');
 
 let server;
 let base;
@@ -42,7 +43,7 @@ function client() {
     if (data.csrfToken) csrf = data.csrfToken;
     return { status: res.status, data };
   };
-  return { call };
+  return { call, get cookie() { return cookie; }, set cookie(v) { cookie = v; }, set csrf(v) { csrf = v; } };
 }
 
 let n = 0;
@@ -53,7 +54,7 @@ async function user() {
 }
 async function admin() {
   const a = client();
-  assert.equal((await a.call('POST', '/auth/login', { email: 'admin@bazaario.local', password: 'AdminPass123' })).status, 200);
+  await signInAdmin(a);
   return a;
 }
 async function address(c, state = 'Maharashtra', pincode = '411001') {

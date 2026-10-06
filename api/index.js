@@ -7,6 +7,8 @@ process.env.DB_FILE = process.env.DB_FILE || '/tmp/bazaario.db';
 process.env.UPLOAD_DIR = process.env.UPLOAD_DIR || '/tmp/uploads';
 process.env.INLINE_IMAGES = process.env.INLINE_IMAGES || '1';
 process.env.TRUST_PROXY = process.env.TRUST_PROXY || '1';
+// No database connected: tell the admin portal, so it can warn that accounts and data are temporary.
+if (!process.env.TURSO_DATABASE_URL && !process.env.LIBSQL_URL) process.env.TEMPORARY_STORAGE = '1';
 
 const db = require('../src/db');
 const { seed } = require('../src/seed');

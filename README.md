@@ -24,7 +24,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 3. Wait about 1-2 minutes. Dependencies install and the store starts by itself; a browser tab opens at
    `https://<name>-3000.app.github.dev`.
    *If no tab opens:* open the **Ports** tab at the bottom, then click the 🌐 icon next to port 3000.
-4. Admin login: `admin@bazaario.local` / `ChangeMe123` (set in `.devcontainer/devcontainer.json`; change it there).
+4. Admin portal: open `/admin` and sign in with `admin@bazaario.local` / `ChangeMe123` (set in `.devcontainer/devcontainer.json`; change it there). 
 5. *To share the link with others:* Ports tab → right-click port 3000 → **Port Visibility → Public**.
    - The codespace stops after 30 minutes of inactivity. Reopen it from github.com/codespaces.
    - Personal accounts get about 60 free hours a month.
@@ -44,7 +44,7 @@ infringement and passing-off under the Indian Trade Marks Act, 1999.
 ### Option C: Vercel with a free Turso database (data kept for good)
 1. Sign in at <https://vercel.com> with GitHub → **Add New → Project** → import this repository → **Deploy**.
 2. In the project open **Storage → Create Database → Turso** (free) and connect it to the project, ticking **Production** and **Preview**. Vercel adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for you.
-3. **Deployments → ⋯ → Redeploy**. Open the site, click **Sign in** and create your owner account.
+3. **Deployments → ⋯ → Redeploy**. Open `https://<your-site>/admin` and create your owner account.
    *Without step 2* the store still runs, but Vercel wipes its data on restart, so treat it as a preview.
 
 *Other hosts that work the same way:* Railway, Fly.io, Azure App Service, AWS Elastic Beanstalk. Use the Docker image from Section 4.
@@ -121,7 +121,8 @@ bump `VERSION` in `public/sw.js` so installed apps pick up the change immediatel
 | CSRF | Per-session synchroniser token (`X-CSRF-Token`) + Origin/Referer same-host check + `SameSite=Lax` cookie (`src/security.js`) |
 | Broken authentication | scrypt hashing with per-user salt, password policy, 5-strike / 15-min lockout, per-IP rate limit, generic errors & constant-time compare (no user enumeration), session rotation on login, all sessions revoked on password change |
 | Session hijacking | Random 256-bit token in `HttpOnly` cookie (`__Host-` prefix + `Secure` in production); only its SHA-256 is stored server-side; 7-day sliding expiry |
-| Broken access control / IDOR | `requireAuth` / `requireAdmin` middleware; every customer query is scoped by `user_id` |
+| Broken access control / IDOR | `requireAuth` / `requireAdmin` middleware; every customer query is scoped by `user_id`; staff roles (Owner, Manager, Support) checked on every admin request (`src/staff.js`) |
+| Admin account takeover | Separate admin portal at `/admin` with its own session cookie (`Path=/api/admin`, `SameSite=Strict`), so a shopping session never opens it; optional sign-in code from an authenticator app (RFC 6238, each code works once) with one-time recovery codes; 30-minute idle sign-out and a 12-hour session limit |
 | Price / business-logic tampering | Prices, discounts, shipping and totals are recomputed on the server; client prices are ignored; stock decremented atomically in a transaction (no overselling); order-status state machine |
 | Sensitive data exposure | Card numbers never stored (only last 4 digits); no stack traces leaked; `Cache-Control: no-store` on API |
 | Security misconfiguration | Helmet headers (HSTS, frame-ancestors, nosniff, Referrer-Policy, Permissions-Policy); `x-powered-by` removed; JSON body limit 50 KB; non-root Docker user |
@@ -153,12 +154,28 @@ npm install
 ```bash
 npm start
 ```
-**First visit: create your owner account.** Open the store and click **Sign in**. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you land in Bazaario Studio. This happens only once; after that **Sign in** is the normal login. Do this right after deploying, before you share the link.
+**First visit: create your owner account.** Open <http://localhost:3000/admin>. A new store has no owner yet, so it shows **Set up your store**: enter your name, email and a password, and you are in. It then shows your **owner reset key** once: Copy or Download it and keep it safe. This happens only once; do it right after deploying, before you share the link. After that, sign in at `/admin` with your email and password.
+
+*Optional extra safety:* Admin portal → **My account → Sign-in code → Turn on** adds a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator or Authy) to each sign-in, with 10 recovery codes for a lost phone.
 *Optional:* to create the owner from the command line instead, start with `ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='YourStr0ngPass' npm start`.
 
 **Step 5: Open the store**
 - Shop: <http://localhost:3000>
-- Bazaario Studio (admin): sign in with your owner account → **Sign in / Hi, … → Bazaario Studio** (or `#/admin`).
+- Admin portal: <http://localhost:3000/admin> (its own sign-in, separate from the shop).
+
+**Add staff (optional):** Admin portal → **Settings → Staff and roles → Add a staff member**, pick a role, and share the temporary password it shows. They sign in at `/admin` and choose their own password.
+
+| Role | Can open |
+|---|---|
+| Owner | Everything, including staff accounts, roles and the audit log |
+| Manager | Orders, returns, deliveries, catalog, sellers, resellers, claims, payouts, marketing, help desk, customers, reports |
+| Support | Dashboard, orders (read only), returns, help desk, customers, messages sent |
+
+**Forgotten password or lost phone**
+- Owner: on the sign-in page choose **Forgot password?**, then enter your email, your owner reset key and a new password. Lost the key? While signed in, **My account → Owner reset key → Create a new reset key**.
+- Staff: the owner opens **Staff and roles → Reset access**. The person gets a new temporary password (and their sign-in code, if on, is turned off).
+- Owner with the sign-in code on: sign in with a saved recovery code, then **My account → Sign-in code → Set up a new phone**.
+- Tip: add a second owner, so one can always reset the other.
 
 **Step 6: Try a test purchase**
 1. Register a customer account (top right → *Start here*).
@@ -168,7 +185,7 @@ npm start
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
 
 **Reset demo data:** stop the server, then `npm run seed` (or delete the `data/` folder).
-**Run automated tests:** `npm test` (17 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders and admin).
+**Run automated tests:** `npm test` (53 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders, marketplace, Express, growth and the admin portal).
 
 ---
 
@@ -257,6 +274,9 @@ src/routes/shopping.js Cart, save-for-later, guest-cart merge, wishlist, address
 src/routes/orders.js   Checkout quote, place/cancel orders, missed-delivery rescheduling, returns, wallet
 src/routes/support.js  Help desk tickets for buyers and the Studio inbox
 src/routes/admin.js    Bazaario Studio (admin) APIs
+src/routes/admin-auth.js  Admin portal sign-in (email and password; optional authenticator code), staff accounts
+src/staff.js           Staff roles (Owner, Manager, Support) and the sections each one can open
+src/totp.js            Authenticator app codes (RFC 6238)
 src/market.js          Sellers and offers: best offer ranking, Assured badge, seller score, commission
 src/routing.js         Order routing: risk holds, seller acceptance, rerouting and expiry
 src/settlement.js      Seller payouts: commission, fees, GST on fees, TCS, TDS, claims, daily money check
@@ -266,10 +286,12 @@ src/listing.js         Listing details, automatic quality checks, duplicate dete
 src/routes/seller.js   Seller Hub APIs (sign-up, listings, orders, returns, claims, payouts)
 src/routes/admin-market.js  Studio APIs for sellers, catalog check, claims and settlement
 public/                Storefront SPA (index.html, app.js, seller.js for Seller Hub, styles.css)
+public/admin.html      Admin portal page (admin.js, admin.css): sign-in, left menu, staff, My account, idle sign-out
 DESIGN.md              Design rules (colours, type, layout, vocabulary, checklist)
 tests/api.test.js      Integration & security tests (npm test)
 tests/buying-flow.test.js  Delivery promise, Express, EMI, failed delivery, returns, wallet, help desk, OTP, upgrade
 tests/marketplace.test.js  Seller KYC, offers, quality check, checkout split, routing, payouts, claims, score
+tests/admin-portal.test.js Admin sign-in, optional code and recovery codes, idle sign-out, staff roles and accounts
 ```
 
 ## 7. Common customisations
