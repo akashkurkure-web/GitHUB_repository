@@ -18,6 +18,22 @@ const EXTRA_SECTIONS = { account: 'My account' };
 const gate = $('#gate');
 const shell = $('#shell');
 let idleMinutes = 30;
+// True while the store runs without a database (Vercel before Turso is connected): data resets on restart.
+let temporaryStorage = false;
+
+const STORAGE_WARNING = () => h('div', { class: 'alert alert-err adm-storage', role: 'note' },
+  h('b', null, 'Your store has no database connected yet. '),
+  'Vercel starts it fresh each time it restarts (often after a few minutes without use), so accounts, orders and changes disappear and sign-in then fails. ',
+  'To keep them: Vercel → your project → Storage → Create Database → Turso → tick Production and Preview → Connect, then Deployments → ⋯ → Redeploy.');
+
+/** After a failed sign-in, checks whether the store was reset; if so, offers setup again instead of an error. */
+async function storeWasReset() {
+  if (!temporaryStorage) return false;
+  const me = await api('GET', '/admin/auth/me').catch(() => null);
+  if (!me || !me.setupNeeded) return false;
+  viewSetup('The store restarted and started fresh, so the account you made earlier is gone. Create it again below; this keeps happening until a database is connected.');
+  return true;
+}
 
 /** The menu entry for a section, if the signed-in person's role includes it. */
 function adminSection(key) {
@@ -28,8 +44,8 @@ function adminSection(key) {
 function adminGreeting() {
   const hour = Number(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }));
   const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  return h('div', { class: 'adm-hello' }, h('h2', null, `${part}, ${state.user.name.split(' ')[0]}`),
-    h('p', { class: 'muted' }, `Signed in as ${ROLE_INFO[state.user.staffRole].label}. Here is how the store is doing today.`));
+  return [temporaryStorage ? STORAGE_WARNING() : null, h('div', { class: 'adm-hello' }, h('h2', null, `${part}, ${state.user.name.split(' ')[0]}`),
+    h('p', { class: 'muted' }, `Signed in as ${ROLE_INFO[state.user.staffRole].label}. Here is how the store is doing today.`))];
 }
 
 // ---------------- Layout: menu, top bar, account menu ----------------
@@ -96,7 +112,7 @@ function showGate(...nodes) {
   document.title = 'Sign in · Bazaario Admin';
   gate.replaceChildren(h('div', { class: 'adm-gate-card' },
     h('div', { class: 'adm-gate-brand' }, h('span', { class: 'logo-mark', 'aria-hidden': 'true' }, 'B'), h('span', null, h('b', null, 'Bazaario'), h('small', null, 'Admin portal'))),
-    ...nodes),
+    temporaryStorage ? STORAGE_WARNING() : null, ...nodes),
   h('p', { class: 'adm-gate-foot' }, h('a', { href: '/' }, '← Back to the store')));
   const first = gate.querySelector('input');
   if (first) first.focus();
@@ -117,8 +133,13 @@ function viewSignIn(notice) {
       e.preventDefault(); err.classList.add('hidden'); btn.disabled = true;
       try {
         const r = await api('POST', '/admin/auth/login', { email: email.value, password: pw.value });
-        if (r.user) startPortal(r); else viewCode(r);
-      } catch (ex) { showErr(err, ex.message); btn.disabled = false; pw.value = ''; pw.focus(); }
+        if (!r.user) return viewCode(r);
+        startPortal(r);
+        if (r.resetKey) showResetKey(r.resetKey, 'You are now the store owner. Save your owner reset key');
+      } catch (ex) {
+        if (ex.status === 401 && await storeWasReset()) return;
+        showErr(err, ex.message); btn.disabled = false; pw.value = ''; pw.focus();
+      }
     } }, field('Email', email), field('Password', pw), btn),
     h('p', { class: 'adm-center' }, h('button', { type: 'button', class: 'link-btn', onclick: () => viewForgot(email.value) }, 'Forgot password?')));
 }
@@ -142,7 +163,10 @@ function viewForgot(prefill = '') {
         const r = await api('POST', '/admin/auth/forgot', { email: email.value, resetKey: key.value, newPassword: npw.value });
         startPortal(r);
         showResetKey(r.resetKey, 'Password changed. Save your new reset key', 'Your old reset key has been used up. This new one replaces it.');
-      } catch (ex) { showErr(err, ex.message); btn.disabled = false; }
+      } catch (ex) {
+        if (await storeWasReset()) return;
+        showErr(err, ex.message); btn.disabled = false;
+      }
     } }, field('Email', email), field('Owner reset key', key), field('New password', npw, 'At least 8 characters, with letters and numbers.'),
     field('Re-enter new password', npw2), btn),
     h('p', { class: 'adm-center' }, h('button', { type: 'button', class: 'link-btn', onclick: () => viewSignIn() }, 'Back to sign in')));
@@ -165,7 +189,7 @@ function showResetKey(key, title = 'Save your owner reset key', note = 'If you e
   modal.showModal();
 }
 
-function viewSetup() {
+function viewSetup(notice) {
   const name = h('input', { required: true, maxLength: 60, autocomplete: 'name', placeholder: 'First and last name' });
   const email = h('input', { type: 'email', required: true, autocomplete: 'email', maxLength: 254 });
   const pw = h('input', { type: 'password', required: true, minLength: 8, maxLength: 128, autocomplete: 'new-password' });
@@ -173,7 +197,8 @@ function viewSetup() {
   const err = errBox();
   const btn = h('button', { class: 'btn btn-primary btn-block' }, 'Create owner account');
   showGate(h('h1', null, 'Set up your store'),
-    h('p', { class: 'muted' }, 'Create the owner account. You do this once; after that, add staff from Staff and roles.'), err,
+    h('p', { class: 'muted' }, 'Create the owner account. You do this once; after that, add staff from Staff and roles.'),
+    notice ? h('div', { class: 'alert alert-test', role: 'status' }, notice) : null, err,
     h('form', { onsubmit: async (e) => {
       e.preventDefault(); err.classList.add('hidden');
       if (pw.value !== pw2.value) return showErr(err, 'Passwords do not match.');
@@ -184,7 +209,9 @@ function viewSetup() {
         showResetKey(r.resetKey, 'Your store is ready. Save your owner reset key');
       } catch (ex) { showErr(err, ex.message); btn.disabled = false; }
     } }, field('Your name', name), field('Email', email), field('Password', pw, 'At least 8 characters, with letters and numbers.'),
-    field('Re-enter password', pw2), btn));
+    field('Re-enter password', pw2), btn),
+    h('p', { class: 'adm-center adm-gate-foot' }, 'Already signed up on the store? ',
+      h('button', { type: 'button', class: 'link-btn', onclick: () => viewSignIn('Sign in with your store account. As there is no owner yet, it becomes the owner account.') }, 'Sign in with that account')));
 }
 
 /**
@@ -500,6 +527,7 @@ async function initAdmin() {
     state.config = cfg;
     state.categories = cats.categories;
     me = who;
+    temporaryStorage = !!who.temporaryStorage;
   } catch {
     showGate(h('h1', null, 'Cannot reach the store'), h('p', { class: 'muted' }, 'Check your internet connection, then reload this page.'));
     return;

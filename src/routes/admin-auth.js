@@ -95,9 +95,9 @@ function openSession(req, res, user, how) {
 
 router.get('/me', (req, res) => {
   if (req.user && req.session.admin) {
-    return res.json({ user: portalUser(req.user), csrfToken: req.session.csrf, idleMinutes: config.adminIdleMs / 60000 });
+    return res.json({ user: portalUser(req.user), csrfToken: req.session.csrf, idleMinutes: config.adminIdleMs / 60000, temporaryStorage: config.temporaryStorage });
   }
-  res.json({ user: null, setupNeeded: !hasOwner(), ended: req.adminSessionEnded || null });
+  res.json({ user: null, setupNeeded: !hasOwner(), ended: req.adminSessionEnded || null, temporaryStorage: config.temporaryStorage });
 });
 
 // First run: the store has no owner yet, so the first person here creates the owner account.
@@ -112,7 +112,7 @@ router.post('/setup', limiter, async (req, res) => {
     const existing = d.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (existing) {
       // A shopper account with this email becomes the owner only with its own password.
-      if (!verifyPassword(req.body.password, existing.password_hash)) throw new HttpError(409, 'An account with this email already exists. Use its password, or a different email.');
+      if (!verifyPassword(req.body.password, existing.password_hash)) throw new HttpError(409, 'This email already has a store account (made when you signed up on the store). Enter that account\'s password here to make it the owner account, or use a different email.');
       d.prepare("UPDATE users SET role = 'admin', staff_role = 'owner', name = ? WHERE id = ?").run(name, existing.id);
       return d.prepare('SELECT * FROM users WHERE id = ?').get(existing.id);
     }
@@ -130,7 +130,18 @@ router.post('/setup', limiter, async (req, res) => {
 router.post('/login', limiter, async (req, res) => {
   const user = checkPassword(req, req.body.email, req.body.password);
   if (user.role !== 'admin') {
-    throw new HttpError(403, 'This is a shopping account, not a staff account. Shoppers sign in on the store.');
+    // Before the store has an owner, the right password to a store account makes it the owner account
+    // (the same as setting up with that email), so signing up on the store first is not a dead end.
+    if (!hasOwner()) {
+      db.get().prepare("UPDATE users SET role = 'admin', staff_role = 'owner' WHERE id = ? AND role != 'admin'").run(user.id);
+      const owner = db.get().prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      req.user = owner;
+      audit(req, 'owner.setup', { from: 'store-account' });
+      const out = openSession(req, res, owner, 'password');
+      out.resetKey = issueResetKey(owner.id);
+      return res.status(201).json(out);
+    }
+    throw new HttpError(403, 'This email is a shopping account, not a staff account. Ask the store owner to add you under Staff and roles.');
   }
   if (user.must_change_password || user.totp_secret) return res.json(await challengeFor(user));
   res.json(openSession(req, res, user, 'password'));

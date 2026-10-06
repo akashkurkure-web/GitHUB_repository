@@ -12,6 +12,8 @@ module.exports = {
   // Hosted libSQL / Turso database (keeps data across restarts). Unset = local SQLite file at dbFile.
   databaseUrl: env.TURSO_DATABASE_URL || env.LIBSQL_URL || '',
   databaseToken: env.TURSO_AUTH_TOKEN || env.LIBSQL_AUTH_TOKEN || '',
+  // Hosted without a database (e.g. Vercel before Turso is connected): data lasts only until the server restarts.
+  temporaryStorage: env.TEMPORARY_STORAGE === '1',
   dbFile: env.DB_FILE || path.join(__dirname, '..', 'data', 'bazaario.db'),
   // Product photos uploaded in Bazaario Studio. Keep this on persistent storage, next to the database.
   uploadDir: env.UPLOAD_DIR || path.join(__dirname, '..', 'data', 'uploads'),

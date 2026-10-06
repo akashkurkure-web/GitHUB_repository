@@ -63,3 +63,18 @@ test('owner setup: an existing shopper email needs that account\'s own password'
   const u = db.get().prepare('SELECT role, staff_role FROM users WHERE email = ?').get('shopper@shop.in');
   assert.deepEqual({ ...u }, { role: 'admin', staff_role: 'owner' });
 });
+
+test('before there is an owner, signing in at /admin with a store account makes it the owner', async () => {
+  db.get().prepare("UPDATE users SET role = 'customer', staff_role = NULL").run(); // back to a store with no owner
+  assert.equal((await call('POST', '/auth/register', { name: 'Akash', email: 'akash@shop.in', password: 'akashpass1' })).status, 201);
+  assert.equal((await call('POST', '/admin/auth/login', { email: 'akash@shop.in', password: 'wrongpass1' })).status, 401);
+  const s = {};
+  const r = await call('POST', '/admin/auth/login', { email: 'Akash@Shop.in', password: 'akashpass1' }, s);
+  assert.equal(r.status, 201);
+  assert.equal(r.data.user.staffRole, 'owner');
+  assert.match(r.data.resetKey, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$/);
+  assert.equal((await call('GET', '/admin/products', undefined, s)).status, 200);
+  // Once there is an owner, other store accounts stay out.
+  assert.equal((await call('POST', '/auth/register', { name: 'Other', email: 'other@shop.in', password: 'otherpass1' })).status, 201);
+  assert.equal((await call('POST', '/admin/auth/login', { email: 'other@shop.in', password: 'otherpass1' })).status, 403);
+});

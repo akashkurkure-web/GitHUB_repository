@@ -117,3 +117,7 @@ body.adm { background: var(--paper); min-height: 100vh; }
   .adm-shell { display: block; }
 }
 @media (prefers-reduced-motion: reduce) { .adm-side { transition: none; } }
+
+/* ---------- No database connected ---------- */
+.adm-storage { font-size: 12.5px; line-height: 1.5; margin: 0 0 14px; }
+.adm-content .adm-storage { font-size: 13px; }

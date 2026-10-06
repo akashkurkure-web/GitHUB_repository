@@ -185,7 +185,7 @@ npm start
 5. As admin, move the order Packed → Shipped → Delivered; as the customer, write a *Verified Purchase* review or request a return.
 
 **Reset demo data:** stop the server, then `npm run seed` (or delete the `data/` folder).
-**Run automated tests:** `npm test` (52 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders, marketplace, Express, growth and the admin portal).
+**Run automated tests:** `npm test` (53 tests cover the catalog, auth, CSRF, IDOR, pricing, payments, orders, marketplace, Express, growth and the admin portal).
 
 ---
 
