@@ -330,3 +330,13 @@ class LoginCaseTests(TestCase):
             self.client.logout()
             r = self.client.post(reverse("accounts:login"), {"username": typed, "password": "Demo@12345"})
             self.assertEqual(r.status_code, 302, typed)
+
+
+class ProfessionalPagesTests(TestCase):
+    def test_about_robots_and_sitemap(self):
+        self.assertContains(self.client.get("/about/"), "How we work")
+        self.assertContains(self.client.get("/robots.txt"), "Sitemap:")
+        r = self.client.get("/sitemap.xml")
+        self.assertContains(r, "/solutions/medical/")
+        self.assertEqual(r["Content-Type"], "application/xml")
+        self.assertContains(self.client.get("/"), "application/ld+json")

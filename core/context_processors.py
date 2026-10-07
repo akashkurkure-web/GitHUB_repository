@@ -10,6 +10,7 @@ def portal(request):
         "CURRENCY": settings.PORTAL_CURRENCY,
         "MAX_UPLOAD_MB": settings.MAX_UPLOAD_MB,
         "COMPANY": settings.COMPANY,
+        "SITE_URL": settings.SITE_URL.rstrip("/") if settings.SITE_URL else request.build_absolute_uri("/").rstrip("/"),
         "PAYMENTS_ENABLED": settings.PAYMENTS_ENABLED,
         "COMMISSION_PERCENT": settings.COMMISSION_PERCENT,
         "SEGMENT_INFO": SEGMENT_INFO,

@@ -58,7 +58,7 @@ def segment(request, key):
 
 def page(request, name):
     templates = {
-        "how-it-works": "core/how_it_works.html", "contact": "core/contact.html",
+        "how-it-works": "core/how_it_works.html", "contact": "core/contact.html", "about": "core/about.html",
         "privacy": "legal/privacy.html", "terms": "legal/terms.html", "refunds": "legal/refunds.html",
         "shipping": "legal/shipping.html",
     }

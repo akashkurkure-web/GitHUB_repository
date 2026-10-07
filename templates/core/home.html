@@ -9,9 +9,9 @@
   <div class="container position-relative">
     <div class="row align-items-center g-4 g-lg-5">
       <div class="col-lg-6 reveal">
-        <span class="pill-badge mb-4"><span class="pulse"></span> Now taking orders across India</span>
-        <h1 class="display-x mb-4">Ideas in.<br><span class="grad-text">Finished parts out.</span></h1>
-        <p class="lead-x mb-4">Upload an STL, STEP or even a hand sketch. We check it, quote within one working day, print on industrial machines, inspect every piece and deliver to your door.</p>
+        <span class="pill-badge mb-4"><span class="pulse"></span> 3D printing service · Mumbai · Delivering across India</span>
+        <h1 class="display-x mb-4">Professional 3D printing, <span class="grad-text">from one part to thousands.</span></h1>
+        <p class="lead-x mb-4">Prototypes, production parts, home decor and medical models. Send your file or drawing, get a clear quote with GST within one working day, and track your order to your door.</p>
         <div class="d-flex flex-wrap gap-3 mb-5">
           <a href="{% url 'orders:request_quote' %}" class="btn btn-glow btn-lg">Get a free quote <i class="bi bi-arrow-right ms-1"></i></a>
           <a href="{% url 'catalog:list' %}" class="btn btn-ghost btn-lg"><i class="bi bi-bag me-1"></i> Shop ready designs</a>
@@ -64,13 +64,32 @@
   </div>
 </section>
 
-<section class="stats-band">
+<section class="section-x why-us">
   <div class="container">
-    <div class="row g-4 text-center">
-      <div class="col-6 col-md-3"><div class="stat"><strong>24<small>h</small></strong><span>Quote turnaround</span></div></div>
-      <div class="col-6 col-md-3"><div class="stat"><strong>10<small>+</small></strong><span>Materials and finishes</span></div></div>
-      <div class="col-6 col-md-3"><div class="stat"><strong>4</strong><span>Print technologies</span></div></div>
-      <div class="col-6 col-md-3"><div class="stat"><strong>1<small>–</small>10k</strong><span>Pieces per order</span></div></div>
+    <div class="row g-4 g-lg-5 align-items-center">
+      <div class="col-lg-4 reveal">
+        <span class="eyebrow">Why {{ PORTAL_NAME }}</span>
+        <h2 class="section-title">Our promise on every order</h2>
+        <p class="text-secondary mb-0">Clear prices, careful checks and one point of contact from quote to delivery.</p>
+      </div>
+      <div class="col-lg-8">
+        <div class="row g-3">
+          <div class="col-sm-6 reveal d1"><div class="promise"><i class="bi bi-search"></i><div><h6>Free design check</h6><p>We review every file for printability before quoting, at no cost.</p></div></div></div>
+          <div class="col-sm-6 reveal d2"><div class="promise"><i class="bi bi-receipt"></i><div><h6>Transparent pricing</h6><p>Price, GST and delivery shown upfront. No hidden charges.</p></div></div></div>
+          <div class="col-sm-6 reveal d3"><div class="promise"><i class="bi bi-camera"></i><div><h6>Quality checked</h6><p>Every order is inspected, with photos shared before dispatch.</p></div></div></div>
+          <div class="col-sm-6 reveal d4"><div class="promise"><i class="bi bi-headset"></i><div><h6>One point of contact</h6><p>A real person handles your order from first message to delivery.</p></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="industries">
+  <div class="container">
+    <p class="industries-title">Industries we serve</p>
+    <div class="industries-row">
+      <span><i class="bi bi-car-front"></i>Automotive</span><span><i class="bi bi-cpu"></i>Electronics</span><span><i class="bi bi-building"></i>Architecture</span>
+      <span><i class="bi bi-gear-wide-connected"></i>Engineering</span><span><i class="bi bi-hospital"></i>Healthcare education</span><span><i class="bi bi-house-heart"></i>Interiors and gifting</span><span><i class="bi bi-mortarboard"></i>Colleges and startups</span>
     </div>
   </div>
 </section>

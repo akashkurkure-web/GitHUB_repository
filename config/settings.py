@@ -189,6 +189,7 @@ COMPANY = {
     "email": env("SUPPORT_EMAIL", "support@example.com"),
     "phone": env("SUPPORT_PHONE", ""),
     "whatsapp": env("SUPPORT_WHATSAPP", ""),
+    "hours": env("SUPPORT_HOURS", "Mon to Sat, 10 am to 7 pm"),
     "grievance_officer": env("GRIEVANCE_OFFICER_NAME", ""),
     "grievance_email": env("GRIEVANCE_OFFICER_EMAIL", ""),
     "grievance_phone": env("GRIEVANCE_OFFICER_PHONE", ""),

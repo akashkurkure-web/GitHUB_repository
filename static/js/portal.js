@@ -81,7 +81,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const nav = document.querySelector(".site-nav");
   if (nav) {
-    const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 24);
+    const header = document.querySelector(".site-header");
+    const onScroll = () => {
+      const on = window.scrollY > 24;
+      nav.classList.toggle("scrolled", on);
+      if (header) header.classList.toggle("scrolled", on);
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
   }

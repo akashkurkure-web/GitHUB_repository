@@ -6,6 +6,16 @@
   <title>{% block title %}{{ PORTAL_TAGLINE }}{% endblock %} · {{ PORTAL_NAME }}</title>
   <meta name="description" content="{% block meta_description %}{{ PORTAL_NAME }}: 3D printing in Mumbai for mass manufacturing, custom parts, home decor and medical models. Upload your design and get a quote.{% endblock %}">
   <link rel="icon" href="{% static 'img/favicon.svg' %}">
+  <meta name="theme-color" content="#0b1020">
+  <link rel="canonical" href="{{ SITE_URL }}{{ request.path }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ PORTAL_NAME }}">
+  <meta property="og:title" content="{% block og_title %}{{ PORTAL_NAME }}: 3D printing in Mumbai, delivered across India{% endblock %}">
+  <meta property="og:description" content="Prototypes, production parts, home decor and medical models. Upload your design and get a quote with GST within one working day.">
+  <meta property="og:url" content="{{ SITE_URL }}{{ request.path }}">
+  <meta property="og:locale" content="en_IN">
+  <meta name="twitter:card" content="summary">
+  {% if request.resolver_match.url_name == "home" %}<script type="application/ld+json">{"@context": "https://schema.org", "@type": "LocalBusiness", "name": "{{ COMPANY.legal_name|default:PORTAL_NAME|escapejs }}", "description": "3D printing service for prototypes, production parts, home decor and medical models.", "url": "{{ SITE_URL }}", "email": "{{ COMPANY.email|escapejs }}"{% if COMPANY.phone %}, "telephone": "{{ COMPANY.phone|escapejs }}"{% endif %}, "address": {"@type": "PostalAddress", "streetAddress": "{{ COMPANY.address|escapejs }}", "addressLocality": "Mumbai", "addressRegion": "Maharashtra", "addressCountry": "IN"}, "areaServed": "IN"}</script>{% endif %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">

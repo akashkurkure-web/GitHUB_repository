@@ -1,5 +1,6 @@
 {% extends "legal/_layout.html" %}
 {% block title %}Contact us{% endblock %}
+{% block updated %}{% endblock %}
 {% block heading %}Contact us{% endblock %}
 {% block legal %}
 <div class="row g-4">
@@ -10,7 +11,7 @@
     <h5><i class="bi bi-telephone text-primary me-2"></i>Phone and WhatsApp</h5>
     <p class="mb-1">{% if COMPANY.phone %}<a href="tel:{{ COMPANY.phone }}">{{ COMPANY.phone }}</a>{% else %}<span class="text-muted">Coming soon</span>{% endif %}</p>
     {% if COMPANY.whatsapp %}<p class="mb-0"><a href="https://wa.me/{{ COMPANY.whatsapp }}" rel="noopener"><i class="bi bi-whatsapp"></i> Chat on WhatsApp</a></p>{% endif %}
-    <p class="small text-muted mb-0">Monday to Saturday, 10 am to 7 pm IST.</p>
+    <p class="small text-muted mb-0">{{ COMPANY.hours }} (IST).</p>
   </div></div></div>
   <div class="col-md-6"><div class="card h-100"><div class="card-body">
     <h5><i class="bi bi-geo-alt text-primary me-2"></i>Registered office</h5>

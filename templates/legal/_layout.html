@@ -6,7 +6,7 @@
   <div class="container position-relative" style="max-width:860px">
     <div class="breadcrumb-x"><a href="{% url 'core:home' %}">Home</a> / {% block crumb %}Information{% endblock %}</div>
     <h1 class="mb-1">{% block heading %}{% endblock %}</h1>
-    <p class="small mb-0">Last updated {{ updated }}</p>
+    {% block updated %}<p class="small mb-0">Last updated {{ updated }}</p>{% endblock %}
   </div>
 </section>
 <section class="py-5">

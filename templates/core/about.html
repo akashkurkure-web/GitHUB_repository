@@ -1,0 +1,30 @@
+{% extends "legal/_layout.html" %}
+{% block title %}About us{% endblock %}
+{% block meta_description %}About {{ PORTAL_NAME }}: a Mumbai 3D printing service for prototypes, production parts, home decor and medical models, delivering across India.{% endblock %}
+{% block crumb %}About{% endblock %}
+{% block updated %}{% endblock %}
+{% block heading %}About {{ PORTAL_NAME }}{% endblock %}
+{% block legal %}
+<p class="lead">{{ PORTAL_NAME }} makes 3D printing simple for businesses and homes across India. You send a file, a drawing or just an idea; we take care of everything until the finished part reaches your door.</p>
+
+<h4>What we do</h4>
+<p>We print prototypes and functional parts for engineers and startups, production batches for manufacturers, ready-made decor and gifts for homes, and anatomical models for clinics, colleges and labs.</p>
+
+<h4>How we work</h4>
+<p>Our team handles your order from start to finish: we review your design, recommend the right material and process, and send a clear quote with GST. Printing is done by our trusted production partner on industrial machines. Every order is inspected before it is packed and shipped, and you can follow each step in your account.</p>
+
+<div class="row g-3 my-4 about-grid">
+  <div class="col-md-4"><div class="promise"><i class="bi bi-bullseye"></i><div><h6>Accuracy</h6><p>Parts that match your design and your deadline.</p></div></div></div>
+  <div class="col-md-4"><div class="promise"><i class="bi bi-eye"></i><div><h6>Transparency</h6><p>Clear prices and live order status, always.</p></div></div></div>
+  <div class="col-md-4"><div class="promise"><i class="bi bi-shield-lock"></i><div><h6>Confidentiality</h6><p>Your designs are never shared or reused.</p></div></div></div>
+</div>
+
+<h4>Company details</h4>
+<p class="mb-1">{{ COMPANY.legal_name|default:PORTAL_NAME }}</p>
+<p class="mb-1">{{ COMPANY.address }}</p>
+{% if COMPANY.cin %}<p class="mb-1">CIN {{ COMPANY.cin }}</p>{% endif %}
+{% if COMPANY.gstin %}<p class="mb-1">GSTIN {{ COMPANY.gstin }}</p>{% endif %}
+<p class="mb-0"><a href="mailto:{{ COMPANY.email }}">{{ COMPANY.email }}</a>{% if COMPANY.phone %} · <a href="tel:{{ COMPANY.phone }}">{{ COMPANY.phone }}</a>{% endif %}</p>
+
+<div class="mt-4 d-flex flex-wrap gap-2"><a href="{% url 'orders:request_quote' %}" class="btn btn-glow">Get a free quote</a> <a href="{% url 'core:page' 'contact' %}" class="btn btn-outline-primary">Contact us</a></div>
+{% endblock %}
