@@ -20,9 +20,31 @@ from .notify import notify, send_email, staff_users
 S = Order.Status
 
 
+HOME_FAQS = [
+    ("Which file formats can I send?",
+     "STL, OBJ, 3MF, STEP and IGES for 3D models, or PDF, DXF, DWG, PNG and JPG drawings. A clear sketch "
+     "with dimensions is enough to start. Files above the upload limit can be shared as a Google Drive or WeTransfer link."),
+    ("How long does a quote take?",
+     "Usually within one working day. Complex or large batches may take a little longer; we will tell you if so."),
+    ("How do I pay?",
+     "By UPI or bank transfer to our company account, with the exact amount shown on your order page. "
+     "Orders of Rs 50,000 and above need only a 50% advance, with the balance before dispatch."),
+    ("Do I get a GST invoice?",
+     "Yes. Every order gets a proper invoice with CGST and SGST inside Maharashtra, or IGST for other states. "
+     "Add your GSTIN while ordering to claim input credit."),
+    ("Is my design kept confidential?",
+     "Your files are visible only to you, our team and the production partner printing your order. "
+     "Tell us if you need an NDA for a sensitive project."),
+    ("Can you print medical implants?",
+     "No. We print anatomical and training models for planning, education and prototyping only. "
+     "They are not medical devices and must not be used in or on a patient."),
+]
+
+
 def home(request):
     return render(request, "core/home.html", {
         "products": Product.objects.filter(is_active=True).select_related("category").defer("image")[:4],
+        "faqs": HOME_FAQS,
     })
 
 

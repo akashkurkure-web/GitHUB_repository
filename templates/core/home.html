@@ -1,55 +1,61 @@
 {% extends "layout_site.html" %}{% load humanize %}
 {% block title %}3D printing in Mumbai for business and home{% endblock %}
+{% block body_class %}site site-dark-top{% endblock %}
 {% block content %}
-<section class="hero">
-  <div class="container">
+<section class="hero-x">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="hero-orb orb-a" aria-hidden="true"></div>
+  <div class="hero-orb orb-b" aria-hidden="true"></div>
+  <div class="container position-relative">
     <div class="row align-items-center g-4 g-lg-5">
-      <div class="col-lg-6">
-        <span class="eyebrow mb-3">3D printing studio · Mumbai</span>
-        <h1 class="mb-3">From your design to a finished part, <span class="text-primary">delivered to your door.</span></h1>
-        <p class="lead text-secondary mb-4">Upload an STL, STEP or a simple drawing. We check it, quote within one working day, print it on industrial machines, inspect every piece and ship it anywhere in India.</p>
-        <div class="d-flex flex-wrap gap-2 mb-4">
-          <a href="{% url 'orders:request_quote' %}" class="btn btn-primary btn-lg">Get a free quote <i class="bi bi-arrow-right"></i></a>
-          <a href="{% url 'catalog:list' %}" class="btn btn-light btn-lg border">Shop home decor</a>
+      <div class="col-lg-6 reveal">
+        <span class="pill-badge mb-4"><span class="pulse"></span> Now taking orders across India</span>
+        <h1 class="display-x mb-4">Ideas in.<br><span class="grad-text">Finished parts out.</span></h1>
+        <p class="lead-x mb-4">Upload an STL, STEP or even a hand sketch. We check it, quote within one working day, print on industrial machines, inspect every piece and deliver to your door.</p>
+        <div class="d-flex flex-wrap gap-3 mb-5">
+          <a href="{% url 'orders:request_quote' %}" class="btn btn-glow btn-lg">Get a free quote <i class="bi bi-arrow-right ms-1"></i></a>
+          <a href="{% url 'catalog:list' %}" class="btn btn-ghost btn-lg"><i class="bi bi-bag me-1"></i> Shop ready designs</a>
         </div>
-        <div class="d-flex flex-wrap gap-4 small text-secondary">
-          <span><i class="bi bi-shield-check text-primary me-1"></i>Your files stay confidential</span>
-          <span><i class="bi bi-receipt text-primary me-1"></i>GST invoice on every order</span>
-          <span><i class="bi bi-truck text-primary me-1"></i>Pan-India delivery</span>
+        <div class="hero-trust">
+          <div><i class="bi bi-shield-lock"></i><span>Files kept<br>confidential</span></div>
+          <div><i class="bi bi-receipt"></i><span>GST invoice<br>on every order</span></div>
+          <div><i class="bi bi-truck"></i><span>Pan-India<br>delivery</span></div>
         </div>
       </div>
-      <div class="col-lg-6">
-        <div class="hero-card card p-4">
-          <div class="d-flex justify-content-between mb-3"><span class="order-no">AK-2610-00042</span><span class="status status-indigo">In production</span></div>
-          <h5 class="mb-1">Sensor housing × 500</h5>
-          <p class="text-muted small mb-4">Nylon PA12 · MJF · dispatch in 12 working days</p>
-          <ul class="tracker">
-            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Request</span></li>
-            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Quote</span></li>
-            <li class="done"><div class="dot"><i class="bi bi-check"></i></div><span class="lbl">Payment</span></li>
-            <li class="current"><div class="dot"><i class="bi bi-printer"></i></div><span class="lbl">Production</span></li>
-            <li><div class="dot"></div><span class="lbl">Delivered</span></li>
-          </ul>
-          <p class="small text-muted mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Every order gets a live tracker like this one.</p>
+      <div class="col-lg-6 reveal d2">
+        <div class="art-stage">
+          {% include "partials/_printer_art.html" %}
+          <div class="float-chip chip-1"><i class="bi bi-lightning-charge-fill"></i><div><strong>Quote in 24 h</strong><small>Free file review</small></div></div>
+          <div class="float-chip chip-2"><i class="bi bi-check2-circle"></i><div><strong>QC photos</strong><small>Before every dispatch</small></div></div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="py-5">
+<section class="materials-strip" aria-label="Materials we print">
+  <div class="marquee"><div class="marquee-track">
+    {% for i in "12" %}<span>PLA</span><span>PETG</span><span>ABS</span><span>ASA</span><span>TPU flexible</span><span>Nylon PA12</span><span>Standard resin</span><span>Tough resin</span><span>Carbon-fibre nylon</span><span>Silk PLA</span><span>Clear resin</span>{% endfor %}
+  </div></div>
+</section>
+
+<section class="section-x">
   <div class="container">
-    <div class="text-center mb-5"><span class="eyebrow">What we print</span><h2 class="section-title">One studio, four kinds of work</h2></div>
+    <div class="section-head reveal">
+      <span class="eyebrow">What we print</span>
+      <h2 class="section-title">One studio. Four kinds of work.</h2>
+      <p>From a single prototype to thousands of production parts, choose the path that fits your project.</p>
+    </div>
     <div class="row g-4">
       {% for key, s in SEGMENT_INFO.items %}
-      <div class="col-md-6 col-xl-3">
-        <a href="{% url 'core:segment' key %}" class="card segment-card h-100 text-reset">
-          <div class="card-body">
-            <div class="feature-icon bg-soft-blue"><i class="bi bi-{{ s.icon }}"></i></div>
+      <div class="col-sm-6 col-xl-3 reveal d{{ forloop.counter }}">
+        <a href="{% url 'core:segment' key %}" class="seg-card seg-{{ key }} text-reset">
+          <div class="seg-top"><i class="bi bi-{{ s.icon }}"></i><span class="seg-no">0{{ forloop.counter }}</span></div>
+          <div class="seg-body">
             <h5>{{ s.title }}</h5>
-            <p class="text-secondary small">{{ s.blurb }}</p>
-            <ul class="list-unstyled small mb-3">{% for p in s.points %}<li class="mb-1"><i class="bi bi-check2 text-success me-1"></i>{{ p }}</li>{% endfor %}</ul>
-            <span class="small text-primary fw-semibold">Learn more <i class="bi bi-arrow-right"></i></span>
+            <p>{{ s.blurb }}</p>
+            <ul>{% for p in s.points %}<li><i class="bi bi-check2"></i>{{ p }}</li>{% endfor %}</ul>
+            <span class="seg-link">Explore <i class="bi bi-arrow-right"></i></span>
           </div>
         </a>
       </div>
@@ -58,32 +64,109 @@
   </div>
 </section>
 
-<section class="py-5 bg-white border-top border-bottom">
+<section class="stats-band">
   <div class="container">
-    <div class="text-center mb-5"><span class="eyebrow">How it works</span><h2 class="section-title">Four simple steps</h2></div>
-    <div class="row g-4 steps">
-      <div class="col-md-3"><div class="step-no">1</div><h6>Send your design</h6><p class="small text-secondary">Upload 3D files or a drawing, or pick a ready design from the shop.</p></div>
-      <div class="col-md-3"><div class="step-no">2</div><h6>Approve the quote</h6><p class="small text-secondary">We review printability and send a clear price including GST and delivery.</p></div>
-      <div class="col-md-3"><div class="step-no">3</div><h6>Pay securely</h6><p class="small text-secondary">Pay by UPI or bank transfer to our company account. Large batches need only a 50% advance.</p></div>
-      <div class="col-md-3"><div class="step-no">4</div><h6>Track to delivery</h6><p class="small text-secondary">Follow printing, quality check and courier tracking from your account.</p></div>
+    <div class="row g-4 text-center">
+      <div class="col-6 col-md-3"><div class="stat"><strong>24<small>h</small></strong><span>Quote turnaround</span></div></div>
+      <div class="col-6 col-md-3"><div class="stat"><strong>10<small>+</small></strong><span>Materials and finishes</span></div></div>
+      <div class="col-6 col-md-3"><div class="stat"><strong>4</strong><span>Print technologies</span></div></div>
+      <div class="col-6 col-md-3"><div class="stat"><strong>1<small>–</small>10k</strong><span>Pieces per order</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section-x">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Technology</span>
+      <h2 class="section-title">The right process for every part</h2>
+      <p>Not sure which one you need? Leave it blank on the quote form and our engineers will recommend one.</p>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-6 col-lg-4 reveal d1"><div class="tech-card">
+        <div class="tech-icon t-fdm"><i class="bi bi-printer"></i></div>
+        <h5>FDM <small>filament</small></h5>
+        <p>Strong, low-cost parts in PLA, PETG, ABS and TPU. Ideal for jigs, enclosures, decor and large pieces.</p>
+        <div class="tech-meta"><span>±0.2 mm</span><span>Most economical</span></div>
+      </div></div>
+      <div class="col-md-6 col-lg-4 reveal d2"><div class="tech-card">
+        <div class="tech-icon t-sla"><i class="bi bi-droplet-half"></i></div>
+        <h5>SLA <small>resin</small></h5>
+        <p>Very fine detail and smooth surfaces. Ideal for figurines, anatomical models and master patterns.</p>
+        <div class="tech-meta"><span>±0.05 mm</span><span>Finest detail</span></div>
+      </div></div>
+      <div class="col-md-6 col-lg-4 reveal d3"><div class="tech-card">
+        <div class="tech-icon t-mjf"><i class="bi bi-grid-3x3-gap"></i></div>
+        <h5>SLS / MJF <small>nylon powder</small></h5>
+        <p>Tough, functional nylon parts with no support marks. Ideal for production batches and moving parts.</p>
+        <div class="tech-meta"><span>±0.1 mm</span><span>Production grade</span></div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section-x bg-ink text-white position-relative overflow-hidden">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="container position-relative">
+    <div class="section-head reveal light">
+      <span class="eyebrow">How it works</span>
+      <h2 class="section-title">From file to doorstep in four steps</h2>
+    </div>
+    <div class="steps-x">
+      <div class="step-x reveal d1"><div class="step-ic"><i class="bi bi-cloud-arrow-up"></i></div><span class="step-n">Step 1</span><h6>Send your design</h6><p>Upload 3D files or a drawing, or pick a ready design from the shop.</p></div>
+      <div class="step-x reveal d2"><div class="step-ic"><i class="bi bi-file-earmark-check"></i></div><span class="step-n">Step 2</span><h6>Approve the quote</h6><p>A clear price with GST and delivery, valid for 15 days.</p></div>
+      <div class="step-x reveal d3"><div class="step-ic"><i class="bi bi-wallet2"></i></div><span class="step-n">Step 3</span><h6>Pay securely</h6><p>UPI or bank transfer to our company account. Big batches need only 50% upfront.</p></div>
+      <div class="step-x reveal d4"><div class="step-ic"><i class="bi bi-box-seam"></i></div><span class="step-n">Step 4</span><h6>Track to delivery</h6><p>Follow printing, quality check and courier tracking live.</p></div>
     </div>
   </div>
 </section>
 
 {% if products %}
-<section class="py-5">
+<section class="section-x">
   <div class="container">
-    <div class="d-flex justify-content-between align-items-end mb-4"><div><span class="eyebrow">Shop</span><h2 class="section-title mb-0">Ready to order</h2></div><a href="{% url 'catalog:list' %}" class="btn btn-outline-primary">View all</a></div>
+    <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4 reveal">
+      <div><span class="eyebrow">Shop</span><h2 class="section-title mb-0">Ready to order</h2></div>
+      <a href="{% url 'catalog:list' %}" class="btn btn-outline-primary rounded-pill px-4">View all designs <i class="bi bi-arrow-right"></i></a>
+    </div>
     <div class="row g-4">{% for p in products %}{% include "catalog/_product_card.html" %}{% endfor %}</div>
   </div>
 </section>
 {% endif %}
 
-<section class="py-5">
+<section class="section-x pt-0">
   <div class="container">
-    <div class="cta-band">
-      <div><h3 class="fw-bold mb-1">Have a part in mind?</h3><p class="mb-0">Send us the file today and get a quote within one working day. No account needed.</p></div>
-      <a href="{% url 'orders:request_quote' %}" class="btn btn-light btn-lg">Request a quote</a>
+    <div class="row g-4 g-lg-5">
+      <div class="col-lg-4 reveal">
+        <span class="eyebrow">Questions</span>
+        <h2 class="section-title">Good to know</h2>
+        <p class="text-secondary">Can't find your answer? <a href="{% url 'core:page' 'contact' %}">Talk to us</a>.</p>
+      </div>
+      <div class="col-lg-8 reveal d2">
+        <div class="accordion faq" id="faq">
+          {% for q, a in faqs %}
+          <div class="accordion-item">
+            <h3 class="accordion-header"><button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#faq{{ forloop.counter }}">{{ q }}</button></h3>
+            <div id="faq{{ forloop.counter }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" data-bs-parent="#faq"><div class="accordion-body">{{ a }}</div></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section-x pt-0">
+  <div class="container">
+    <div class="cta-x reveal">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="position-relative">
+        <h3>Have a part in mind?</h3>
+        <p>Send us the file today and get a quote within one working day. No account needed.</p>
+      </div>
+      <div class="position-relative d-flex flex-wrap gap-2">
+        <a href="{% url 'orders:request_quote' %}" class="btn btn-light btn-lg fw-semibold">Request a quote <i class="bi bi-arrow-right"></i></a>
+        {% if COMPANY.whatsapp %}<a href="https://wa.me/{{ COMPANY.whatsapp }}" rel="noopener" class="btn btn-ghost btn-lg"><i class="bi bi-whatsapp"></i> WhatsApp us</a>{% endif %}
+      </div>
     </div>
   </div>
 </section>

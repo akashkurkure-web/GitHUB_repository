@@ -45,13 +45,13 @@
       {% include "partials/_ship_fields.html" %}
       <div id="medical-ack" class="d-none">{% include "partials/_field.html" with field=form.medical_ack %}</div>
       {% if form.accept_terms %}{% include "partials/_field.html" with field=form.accept_terms %}{% endif %}
-      <button class="btn btn-primary btn-lg"><i class="bi bi-send"></i> Send request</button>
+      <button class="btn btn-glow btn-lg px-4"><i class="bi bi-send me-1"></i> Send request</button>
     </div></div>
   </div>
-  <div class="col-lg-4">
-    <div class="card mb-3"><div class="card-body">
-      <h6>What happens next</h6>
-      <ol class="small ps-3 mb-0">
+  <div class="col-lg-4"><div class="quote-aside">
+    <div class="card mb-3"><div class="card-body p-4">
+      <h6 class="fw-bold mb-3">What happens next</h6>
+      <ol class="next-steps">
         <li class="mb-2">We check your files for printability.</li>
         <li class="mb-2">You get a quote by email with price, GST and dispatch time.</li>
         <li class="mb-2">Approve it online and pay by UPI or bank transfer.</li>
@@ -62,7 +62,7 @@
       <h6><i class="bi bi-shield-lock text-primary me-1"></i>Your design is safe</h6>
       Files are visible only to our team and the production partner making your order. We never publish or reuse your designs.
     </div></div>
-  </div>
+  </div></div>
 </div>
 </form>
 </div>

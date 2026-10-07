@@ -7,10 +7,12 @@
   <meta name="description" content="{% block meta_description %}{{ PORTAL_NAME }}: 3D printing in Mumbai for mass manufacturing, custom parts, home decor and medical models. Upload your design and get a quote.{% endblock %}">
   <link rel="icon" href="{% static 'img/favicon.svg' %}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
   <link href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}" rel="stylesheet">
   <link href="{% static 'css/portal.css' %}" rel="stylesheet">
+  <link href="{% static 'css/site.css' %}" rel="stylesheet">
+  <script>document.documentElement.classList.add("js")</script>
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">

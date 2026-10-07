@@ -1,57 +1,75 @@
 {% extends "layout_site.html" %}
 {% block title %}{{ info.title }}{% endblock %}
+{% block body_class %}site site-dark-top{% endblock %}
 {% block content %}
-<section class="hero hero-sm">
-  <div class="container">
-    <div class="row align-items-center g-4">
-      <div class="col-lg-7">
-        <span class="eyebrow mb-3"><i class="bi bi-{{ info.icon }} me-1"></i>{{ info.title }}</span>
+<section class="page-hero">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="hero-orb orb-a" aria-hidden="true"></div>
+  <div class="container position-relative">
+    <div class="row align-items-center g-4 g-lg-5">
+      <div class="col-lg-7 reveal">
+        <div class="breadcrumb-x"><a href="{% url 'core:home' %}">Home</a> / Solutions</div>
+        <div class="seg-badge seg-accent-{{ key }}"><i class="bi bi-{{ info.icon }}"></i></div>
         <h1 class="mb-3">{{ info.title }}</h1>
-        <p class="lead text-secondary">{{ info.blurb }}</p>
-        <div class="d-flex flex-wrap gap-2 mt-4">
+        <p class="lead mb-4">{{ info.blurb }}</p>
+        <div class="d-flex flex-wrap gap-3">
           {% if key == "decor" %}
-            <a href="{% url 'catalog:list' %}" class="btn btn-primary btn-lg">Shop designs</a>
-            <a href="{% url 'orders:request_quote' %}?segment=custom" class="btn btn-light btn-lg border">Personalised piece</a>
+            <a href="{% url 'catalog:list' %}" class="btn btn-glow btn-lg">Shop designs <i class="bi bi-arrow-right"></i></a>
+            <a href="{% url 'orders:request_quote' %}?segment=custom" class="btn btn-ghost btn-lg">Personalised piece</a>
           {% else %}
-            <a href="{% url 'orders:request_quote' %}?segment={{ key }}" class="btn btn-primary btn-lg">{% if key == "medical" %}Send an enquiry{% else %}Get a quote{% endif %}</a>
+            <a href="{% url 'orders:request_quote' %}?segment={{ key }}" class="btn btn-glow btn-lg">{% if key == "medical" %}Send an enquiry{% else %}Get a free quote{% endif %} <i class="bi bi-arrow-right"></i></a>
           {% endif %}
         </div>
       </div>
-      <div class="col-lg-5">
-        <div class="card p-4">
+      <div class="col-lg-5 reveal d2">
+        <div class="glass-card">
           <h6 class="mb-3">What you get</h6>
-          <ul class="list-unstyled mb-0">{% for p in info.points %}<li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>{{ p }}</li>{% endfor %}</ul>
+          <ul class="list-unstyled mb-0">{% for p in info.points %}<li class="d-flex gap-2 mb-3"><i class="bi bi-check-circle-fill text-success"></i>{{ p }}</li>{% endfor %}
+            <li class="d-flex gap-2"><i class="bi bi-check-circle-fill text-success"></i>GST invoice and pan-India delivery</li></ul>
         </div>
       </div>
     </div>
   </div>
 </section>
-<section class="py-5">
+
+<section class="section-x">
   <div class="container">
-    {% if key == "mass" %}
-      <div class="row g-4">
-        <div class="col-md-4"><h5>Volume pricing</h5><p class="text-secondary">The per-piece price falls as quantity rises. Tell us your annual volume for a rate card.</p></div>
-        <div class="col-md-4"><h5>Production slots</h5><p class="text-secondary">Orders of ₹50,000 and above start with a 50% advance; the balance is due before dispatch.</p></div>
-        <div class="col-md-4"><h5>Batch inspection</h5><p class="text-secondary">Sample pieces from every batch are checked against your critical dimensions and photographed.</p></div>
-      </div>
-    {% elif key == "custom" %}
-      <div class="row g-4">
-        <div class="col-md-4"><h5>Any file, any stage</h5><p class="text-secondary">STL, OBJ, 3MF, STEP, IGES, or a hand sketch with dimensions. We'll tell you if it can be printed.</p></div>
-        <div class="col-md-4"><h5>Material advice</h5><p class="text-secondary">PLA, PETG, ABS, TPU, Nylon and engineering resins. Not sure? Describe the use and we'll recommend.</p></div>
-        <div class="col-md-4"><h5>Iterate quickly</h5><p class="text-secondary">Revise and reorder from your account; every version and file stays with the order.</p></div>
-      </div>
-    {% elif key == "medical" %}
-      <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>We print models for <strong>planning, training, demonstration and prototyping</strong>. These are not medical devices and must not be used in or on a patient. Implants and patient-contact devices need a licensed manufacturer under the Medical Devices Rules, 2017.</div>
-      <div class="row g-4 mt-1">
-        <div class="col-md-4"><h5>Anatomical models</h5><p class="text-secondary">From de-identified CT or MRI segmentations (STL) for surgical planning and patient education.</p></div>
-        <div class="col-md-4"><h5>Training aids</h5><p class="text-secondary">Durable models for colleges, simulation labs and demonstrations.</p></div>
-        <div class="col-md-4"><h5>Confidentiality</h5><p class="text-secondary">Please remove patient names and identifiers before uploading. Files are visible only to our team and the production partner.</p></div>
-      </div>
+    {% if key == "medical" %}
+      <div class="alert alert-warning d-flex gap-2 mb-4 reveal"><i class="bi bi-exclamation-triangle-fill"></i><div>We print models for <strong>planning, training, demonstration and prototyping</strong>. These are not medical devices and must not be used in or on a patient. Implants and patient-contact devices need a licensed manufacturer under the Medical Devices Rules, 2017.</div></div>
     {% endif %}
+    <div class="row g-4">
+      {% if key == "mass" %}
+        <div class="col-md-4 reveal d1"><div class="feature-x"><div class="ic"><i class="bi bi-graph-down-arrow"></i></div><h5>Volume pricing</h5><p>The per-piece price falls as quantity rises. Tell us your annual volume for a rate card.</p></div></div>
+        <div class="col-md-4 reveal d2"><div class="feature-x"><div class="ic"><i class="bi bi-calendar2-check"></i></div><h5>Production slots</h5><p>Orders of ₹50,000 and above start with a 50% advance; the balance is due before dispatch.</p></div></div>
+        <div class="col-md-4 reveal d3"><div class="feature-x"><div class="ic"><i class="bi bi-clipboard2-check"></i></div><h5>Batch inspection</h5><p>Sample pieces from every batch are checked against your critical dimensions and photographed.</p></div></div>
+      {% elif key == "custom" %}
+        <div class="col-md-4 reveal d1"><div class="feature-x"><div class="ic"><i class="bi bi-file-earmark-arrow-up"></i></div><h5>Any file, any stage</h5><p>STL, OBJ, 3MF, STEP, IGES, or a hand sketch with dimensions. We'll tell you if it can be printed.</p></div></div>
+        <div class="col-md-4 reveal d2"><div class="feature-x"><div class="ic"><i class="bi bi-palette2"></i></div><h5>Material advice</h5><p>PLA, PETG, ABS, TPU, nylon and engineering resins. Not sure? Describe the use and we'll recommend.</p></div></div>
+        <div class="col-md-4 reveal d3"><div class="feature-x"><div class="ic"><i class="bi bi-arrow-repeat"></i></div><h5>Iterate quickly</h5><p>Revise and reorder from your account; every version and file stays with the order.</p></div></div>
+      {% elif key == "decor" %}
+        <div class="col-md-4 reveal d1"><div class="feature-x"><div class="ic"><i class="bi bi-tag"></i></div><h5>Fixed prices</h5><p>Pick a design, choose a colour and order online. GST and delivery are shown before you confirm.</p></div></div>
+        <div class="col-md-4 reveal d2"><div class="feature-x"><div class="ic"><i class="bi bi-pencil-square"></i></div><h5>Make it yours</h5><p>Names, sizes and colours on request. Add a note when you order, or send your own idea for a quote.</p></div></div>
+        <div class="col-md-4 reveal d3"><div class="feature-x"><div class="ic"><i class="bi bi-gift"></i></div><h5>Gift-ready</h5><p>Carefully packed so it arrives ready to give, anywhere in India.</p></div></div>
+      {% elif key == "medical" %}
+        <div class="col-md-4 reveal d1"><div class="feature-x"><div class="ic"><i class="bi bi-lungs"></i></div><h5>Anatomical models</h5><p>From de-identified CT or MRI segmentations (STL) for surgical planning and patient education.</p></div></div>
+        <div class="col-md-4 reveal d2"><div class="feature-x"><div class="ic"><i class="bi bi-mortarboard"></i></div><h5>Training aids</h5><p>Durable models for colleges, simulation labs and demonstrations.</p></div></div>
+        <div class="col-md-4 reveal d3"><div class="feature-x"><div class="ic"><i class="bi bi-incognito"></i></div><h5>Confidentiality</h5><p>Please remove patient names and identifiers before uploading. Files are visible only to our team and the production partner.</p></div></div>
+      {% endif %}
+    </div>
     {% if products %}
-      <h4 class="mt-5 mb-3">Popular designs</h4>
+      <div class="d-flex justify-content-between align-items-end mt-5 mb-4"><div><span class="eyebrow">Shop</span><h2 class="section-title mb-0">Popular designs</h2></div><a href="{% url 'catalog:list' %}" class="btn btn-outline-primary rounded-pill px-4">View all</a></div>
       <div class="row g-4">{% for p in products %}{% include "catalog/_product_card.html" %}{% endfor %}</div>
     {% endif %}
+  </div>
+</section>
+
+<section class="section-x pt-0">
+  <div class="container">
+    <div class="cta-x reveal">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="position-relative"><h3>Ready when you are</h3><p>Send your file or idea and get a clear quote within one working day.</p></div>
+      <a href="{% url 'orders:request_quote' %}?segment={{ key }}" class="btn btn-light btn-lg fw-semibold position-relative">{% if key == "medical" %}Send an enquiry{% else %}Request a quote{% endif %} <i class="bi bi-arrow-right"></i></a>
+    </div>
   </div>
 </section>
 {% endblock %}

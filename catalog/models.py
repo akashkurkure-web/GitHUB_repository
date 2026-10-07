@@ -19,6 +19,11 @@ class Category(models.Model):
         ordering = ["sort_order", "name"]
         verbose_name_plural = "categories"
 
+    @property
+    def tone(self):
+        """A colour variant (0-4) so product tiles without photos don't all look alike."""
+        return (self.pk or 0) % 5
+
     def __str__(self):
         return self.name
 

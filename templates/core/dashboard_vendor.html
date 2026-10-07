@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% load humanize %}
 {% block title %}Production dashboard{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Production</h1><p class="sub">Jobs from {{ PORTAL_NAME }}. Customer details and prices are kept with our team; you see what you need to make and ship.</p></div></div>
+<div class="page-head welcome"><div><h1>Production</h1><p class="sub">Jobs from {{ PORTAL_NAME }}. Customer details and prices are kept with our team; you see what you need to make and ship.</p></div></div>
 <div class="row g-4 mb-4">
   {% if user.vendor_manager %}<div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-amber"><i class="bi bi-calculator"></i></div><div><div class="value">{{ kpi_pricing }}</div><div class="label">Price requests</div></div></div></div>{% endif %}
   <div class="col-6 col-lg"><div class="card kpi"><div class="icon bg-soft-blue"><i class="bi bi-inbox"></i></div><div><div class="value">{{ kpi_new }}</div><div class="label">New jobs</div></div></div></div>
