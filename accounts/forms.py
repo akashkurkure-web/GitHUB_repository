@@ -65,15 +65,21 @@ class TermsMixin(forms.Form):
 
 class LoginForm(StyledFormMixin, AuthenticationForm):
     username = forms.CharField(label="Email or username", max_length=254,
-                               widget=forms.TextInput(attrs={"autofocus": True, "autocomplete": "username"}))
+                               widget=forms.TextInput(attrs={"autofocus": True, "autocomplete": "username",
+                                                             "autocapitalize": "none", "autocorrect": "off",
+                                                             "spellcheck": "false"}))
 
     def clean(self):
         username = (self.cleaned_data.get("username") or "").strip()
         if username and LoginAttempt.recent_failures(username) >= settings.LOGIN_MAX_ATTEMPTS:
             raise forms.ValidationError(
                 f"Too many failed attempts. Please wait {settings.LOGIN_LOCK_MINUTES} minutes or reset your password.")
-        # Accept the email address as well as the username.
-        match = User.objects.filter(email__iexact=username).first() if "@" in username else None
+        # Accept the email address as well as the username, ignoring capital letters
+        # (phone keyboards often turn "customer" into "Customer").
+        if "@" in username:
+            match = User.objects.filter(email__iexact=username).first()
+        else:
+            match = User.objects.filter(username__iexact=username).first()
         if match:
             self.cleaned_data["username"] = match.username
         try:

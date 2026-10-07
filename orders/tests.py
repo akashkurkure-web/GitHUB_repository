@@ -319,3 +319,14 @@ class DemoDataButtonTests(TestCase):
         self.client.force_login(ops)
         self.assertEqual(self.client.post("/demo-data/", {"action": "load"}).status_code, 403)
         self.assertEqual(Order.objects.count(), 0)
+
+
+class LoginCaseTests(TestCase):
+    def test_username_is_not_case_sensitive(self):
+        from accounts.models import User
+
+        User.objects.create_user("customer", "customer@example.com", "Demo@12345", role=User.Role.CUSTOMER)
+        for typed in ("Customer", " CUSTOMER ", "Customer@Example.com"):
+            self.client.logout()
+            r = self.client.post(reverse("accounts:login"), {"username": typed, "password": "Demo@12345"})
+            self.assertEqual(r.status_code, 302, typed)
