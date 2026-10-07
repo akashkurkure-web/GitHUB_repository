@@ -7,11 +7,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from accounts.models import User
 from catalog.models import Product
 from orders.models import Order, Payment
 
 from .choices import SEGMENT_INFO
-from .decorators import staff_required
+from .decorators import owner_required, staff_required
 from .forms import GrievanceForm, GrievanceUpdateForm
 from .models import Grievance
 from .notify import notify, send_email, staff_users
@@ -158,6 +159,7 @@ def _staff_dashboard(request):
     if user.is_owner:
         vendor_cost = delivered.aggregate(s=Sum("vendor_price"))["s"] or 0
         ctx["kpi_margin"] = ctx["kpi_sales"] - vendor_cost
+        ctx["has_demo"] = User.objects.filter(username="customer", email="customer@example.com").exists()
     return render(request, "core/dashboard_staff.html", ctx)
 
 
@@ -172,3 +174,19 @@ def notifications_read(request):
     request.user.notifications.filter(is_read=False).update(is_read=True)
     nxt = request.POST.get("next") or ""
     return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "core:notifications")
+
+
+@owner_required
+@require_POST
+def demo_data(request):
+    """Owner-only switch to load or remove sample logins and orders for testing."""
+    from orders.management.commands.seed_demo import PASSWORD, load_demo, remove_demo
+
+    if request.POST.get("action") == "remove":
+        count = remove_demo()
+        messages.success(request, f"Demo data removed ({count} orders and the demo logins).")
+    else:
+        load_demo(real_owner=request.user)
+        messages.success(request, f"Demo data loaded. Test logins (password {PASSWORD}): "
+                                  "customer, vendor, vendorstaff, ops. Remove it before going public.")
+    return redirect("core:dashboard")

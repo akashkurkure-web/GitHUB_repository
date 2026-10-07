@@ -294,3 +294,28 @@ class PublicPagesTests(PortalTestCase):
         self.client.post(reverse("core:grievance"), {"name": "A", "email": "a@example.com", "subject": "Late",
                                                      "details": "Parcel late"})
         self.assertTrue(any("received" in m.subject for m in mail.outbox))
+
+
+class DemoDataButtonTests(TestCase):
+    def test_owner_can_load_and_remove_demo_data(self):
+        from accounts.models import User
+
+        owner = User.objects.create_user("realowner", "boss@akriti.in", "Strong#Pass1", role=User.Role.OWNER)
+        self.client.force_login(owner)
+        r = self.client.post("/demo-data/", {"action": "load"}, follow=True)
+        self.assertContains(r, "Demo data loaded")
+        self.assertContains(r, "Remove")
+        self.assertFalse(User.objects.filter(username="owner").exists())
+        self.assertEqual(Order.objects.count(), 4)
+        r = self.client.post("/demo-data/", {"action": "remove"}, follow=True)
+        self.assertContains(r, "Demo data removed (4 orders")
+        self.assertEqual(Order.objects.count(), 0)
+        self.assertTrue(User.objects.filter(pk=owner.pk).exists())
+
+    def test_non_owner_cannot_load_demo_data(self):
+        from accounts.models import User
+
+        ops = User.objects.create_user("ops1", "ops@akriti.in", "Strong#Pass1", role=User.Role.OPS)
+        self.client.force_login(ops)
+        self.assertEqual(self.client.post("/demo-data/", {"action": "load"}).status_code, 403)
+        self.assertEqual(Order.objects.count(), 0)
