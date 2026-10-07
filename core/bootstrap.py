@@ -14,12 +14,22 @@ from django.db import connection
 log = logging.getLogger(__name__)
 LOCK_ID = 727274  # arbitrary, constant
 
+# Result of the last start-up run, shown on the /status/ page.
+STATE = {"ran": False, "ok": None, "error": ""}
+
+
+def _pooled():
+    return connection.settings_dict.get("DISABLE_SERVER_SIDE_CURSORS", False)
+
 
 def run():
     if not settings.AUTO_MIGRATE:
         return
+    STATE["ran"] = True
     try:
-        if connection.vendor == "postgresql":
+        # Session advisory locks are unreliable through a transaction pooler, so
+        # they are only used on a direct connection.
+        if connection.vendor == "postgresql" and not _pooled():
             with connection.cursor() as cur:
                 cur.execute("SELECT pg_advisory_lock(%s)", [LOCK_ID])
             try:
@@ -29,8 +39,10 @@ def run():
                     cur.execute("SELECT pg_advisory_unlock(%s)", [LOCK_ID])
         else:
             _setup()
-    except Exception:
+        STATE.update(ok=True, error="")
+    except Exception as exc:
         log.exception("Start-up setup failed")
+        STATE.update(ok=False, error=f"{type(exc).__name__}: {exc}")
     finally:
         connection.close()
 

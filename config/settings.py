@@ -99,13 +99,32 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database: SQLite on a laptop; PostgreSQL whenever DATABASE_URL (or Vercel's POSTGRES_URL) is set.
-DATABASE_URL = env("DATABASE_URL") or env("POSTGRES_URL")
+# Database: SQLite on a laptop; PostgreSQL whenever a Postgres connection string
+# is present. Vercel/Neon integrations name it differently depending on the
+# prefix chosen (DATABASE_URL, POSTGRES_URL, STORAGE_URL, ...), so any variable
+# holding a postgres:// URL is accepted. A direct (unpooled) connection is
+# preferred because migrations and advisory locks need a real session.
+def _find_database_url():
+    preferred = ["DATABASE_URL_UNPOOLED", "POSTGRES_URL_NON_POOLING", "DATABASE_URL", "POSTGRES_URL"]
+    for name in preferred:
+        if env(name):
+            return name, env(name)
+    candidates = sorted(
+        (name for name, value in os.environ.items()
+         if name.endswith(("_URL", "_URL_UNPOOLED", "_URL_NON_POOLING"))
+         and value.startswith(("postgres://", "postgresql://"))),
+        key=lambda n: (not n.endswith(("_UNPOOLED", "_NON_POOLING")), n))
+    return (candidates[0], env(candidates[0])) if candidates else ("", "")
+
+
+DATABASE_SOURCE, DATABASE_URL = _find_database_url()
 if DATABASE_URL:
     import dj_database_url
 
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=0 if ON_VERCEL else 600,
                                                   ssl_require=env_bool("DATABASE_SSL", ON_VERCEL))}
+    # Connection poolers (PgBouncer, Neon "-pooler" hosts) cannot keep server-side cursors.
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = "pooler" in DATABASES["default"].get("HOST", "")
 else:
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 
